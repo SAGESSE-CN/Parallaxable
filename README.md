@@ -1,2 +1,2 @@
-# XCParallaxable
+# Parallaxable
 An simple parallaxable controller.
