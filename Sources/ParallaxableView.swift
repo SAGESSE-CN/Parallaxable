@@ -30,67 +30,93 @@ public struct ParallaxableView: View {
     }
 
     public var body: some View {
-        _XCParallaxableViewContainer(content: content, selection: selection)
+        _XCParallaxableViewContainer(content: content, selection: selection, configuration: configuration)
     }
 
     private let content: ParallaxableContent
     private let selection: Binding<Int>?
+    private let configuration: _XCParallaxableViewConfiguration = .init()
 }
 
-
-// MARK: -
-
-
-public extension View {
+public extension ParallaxableView {
     
-    func parallaxableHeader<T: View>(_ view: T) -> some View {
-        _parallaxableCustomView(view, for: \.headerView)
-    }
-    func parallaxableContent<T: View>(_ view: T) -> some View {
-        _parallaxableCustomView(view, for: \.contentView)
-    }
-    func parallaxableFooter<T: View>(_ view: T) -> some View {
-        _parallaxableCustomView(view, for: \.footerView)
-    }
-    
-    func parallaxableBackground<T: View>(_ view: T) -> some View {
-        _parallaxableCustomView(view, for: \.backgroundView)
-    }
-    func parallaxableForgeground<T: View>(_ view: T) -> some View {
-        _parallaxableCustomView(view, for: \.foregroundView)
-    }
-    
-    func parallaxableStyle(_ style: ParallaxableStyle) -> some View {
-        transformEnvironment(\._parallaxableViewConfiguration) {
-            $0.style = style
+    func parallaxableClipped(antialiased: Bool = false) -> Self {
+        _parallaxableConfiguration {
+            $0.isClipped = true
+            $0.isAntialiased = antialiased
         }
     }
-    
-    func onParallaxableChanged(action: @escaping (CGPoint) -> Void) -> some View {
-        transformEnvironment(\._parallaxableViewConfiguration) {
+    func onParallaxableChanged(action: @escaping (CGPoint) -> Void) -> Self {
+        _parallaxableConfiguration {
             $0.contentOffsetObservers.append(action)
         }
     }
 
-    private func _parallaxableCustomView<T: View>(_ view: T, for keyPath: ReferenceWritableKeyPath<_XCParallaxableViewCoordinator, UIView?>) -> some View {
-        transformEnvironment(\._parallaxableViewConfiguration) {
+    func parallaxableHeader<T: View>(_ view: T) -> Self {
+        _parallaxableCustomView(view, for: \.headerView)
+    }
+    func parallaxableContent<T: View>(_ view: T) -> Self {
+        _parallaxableCustomView(view, for: \.contentView)
+    }
+    func parallaxableFooter<T: View>(_ view: T) -> Self {
+        _parallaxableCustomView(view, for: \.footerView)
+    }
+    
+    func parallaxableOverlay<T: View>(_ view: T) -> Self {
+        _parallaxableCustomView(view, for: \.overlayView)
+    }
+    func parallaxableBackground<T: View>(_ view: T) -> Self {
+        _parallaxableCustomView(view, for: \.backgroundView)
+    }
+    
+
+    private func _parallaxableCustomView<T: View>(_ view: T, for keyPath: ReferenceWritableKeyPath<_XCParallaxableViewCoordinator, UIView?>) -> Self {
+        _parallaxableConfiguration {
             $0.handlers[keyPath] = {
                 $0.setWrapperView(view, for: keyPath)
             }
         }
     }
+    private func _parallaxableConfiguration(block: ( _XCParallaxableViewConfiguration) -> ())  -> Self {
+        block(configuration)
+        return self
+    }
 }
+
+
 
 
 // MARK: -
 
 
-public struct ParallaxableStyle {
+public struct ParallaxableViewProxy {
     
-    public var isClipped: Bool
+}
+
+public struct ParallaxableViewReader<Content: View>: View {
     
-    public init(isClipped: Bool = false) {
-        self.isClipped = isClipped
+    /// The view builder that creates the reader's content.
+    public var content: (ParallaxableViewProxy) -> Content
+
+    /// Creates an instance that can perform programmatic scrolling of its
+    /// child scroll views.
+    ///
+    /// - Parameter content: The reader's content, containing one or more
+    /// scroll views. This view builder receives a ``ParallaxableViewProxy``
+    /// instance that you use to perform scrolling.
+    public init(@ViewBuilder content: @escaping (ParallaxableViewProxy) -> Content) {
+        self.content = content
+    }
+    
+    /// The content and behavior of the view.
+    public var body: some View {
+        if #available(iOS 14.0, *) {
+            ScrollViewReader { _ in
+                content(ParallaxableViewProxy())
+            }
+        } else {
+            content(ParallaxableViewProxy())
+        }
     }
 }
 
@@ -197,24 +223,28 @@ public struct ParallaxableBuilder {
 // MARK: -
 
 
-fileprivate struct _XCParallaxableViewConfiguration: EnvironmentKey {
+// MARK: -
 
-    static var defaultValue: _XCParallaxableViewConfiguration = .init()
+
+fileprivate class _XCParallaxableViewConfiguration {
+
+//    static var defaultValue: _XCParallaxableViewConfiguration = .init()
     
-    var style: ParallaxableStyle = .init()
+    var isClipped: Bool = false
+    var isAntialiased: Bool = false
     
     var handlers: [AnyKeyPath: (_XCParallaxableViewCoordinator) -> ()] = [:]
     
     var contentOffsetObservers: [(CGPoint) -> ()] = []
 }
 
-fileprivate extension EnvironmentValues {
-
-    var _parallaxableViewConfiguration: _XCParallaxableViewConfiguration {
-        get { self[_XCParallaxableViewConfiguration.self] }
-        set { self[_XCParallaxableViewConfiguration.self] = newValue }
-    }
-}
+//fileprivate extension EnvironmentValues {
+//
+//    var _parallaxableViewConfiguration: _XCParallaxableViewConfiguration {
+//        get { self[_XCParallaxableViewConfiguration.self] }
+//        set { self[_XCParallaxableViewConfiguration.self] = newValue }
+//    }
+//}
 
 
 // MARK: -
@@ -228,6 +258,8 @@ fileprivate struct _XCParallaxableViewContainer: UIViewControllerRepresentable {
     let content: ParallaxableContent
     /// The selected page index.
     let selection: Binding<Int>?
+    /// The contianer configuration.
+    let configuration: _XCParallaxableViewConfiguration
 
     /// Build a new coordinator in first rendered.
     func makeCoordinator() -> _XCParallaxableViewCoordinator {
@@ -241,7 +273,7 @@ fileprivate struct _XCParallaxableViewContainer: UIViewControllerRepresentable {
 
     /// Update all pages content in to coordinator of the current context.
     func updateUIViewController(_ viewController: UIViewControllerType, context: Context) {
-        context.coordinator.apply(context.environment._parallaxableViewConfiguration)
+        context.coordinator.apply(configuration)
         context.coordinator.setContentView(content)
         context.coordinator.setContentSection(selection, animated: !context.transaction.disablesAnimations)
     }
@@ -284,14 +316,14 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     }
     
     
-    var foregroundView: UIView?
+    var overlayView: UIView?
 
     /// Update the all pages content to shared parallaxable controller.
     func setContentView(_ pages: ParallaxableContent) {
         // Add the current view controllers to the reuse queue, this is a big performance boost.
         reusableHostingControllers = parallaxableController.viewControllers
         
-        // The builder will call `hostingController<T>(_ view: T) -> UIViewController` to a hosting controller,
+        // The builder will call `dequeueReusableHostingController<T>(_ view: T) -> UIViewController` to a hosting controller,
         // It will reuse the old hosting controller as much as possible.
         parallaxableController.viewControllers = pages.build(self)
         
@@ -328,7 +360,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     func apply(_ configuration: _XCParallaxableViewConfiguration) {
         // Apply configuration to parallaxable controller.
         contentOffsetObservers = configuration.contentOffsetObservers
-        parallaxableController.isClipped = configuration.style.isClipped
+        parallaxableController.isClipped = configuration.isClipped
         
         // Apply `SwiftUI.View` changes in to subview.
         configuration.handlers.values.forEach {
@@ -337,7 +369,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         
         // Make sure the backgroundView/foregroundView in the right view hierarchy.
         backgroundView.map(self.parallaxingView.sendSubviewToBack)
-        foregroundView.map(self.parallaxingView.bringSubviewToFront)
+        overlayView.map(self.parallaxingView.bringSubviewToFront)
     }
     
     ///
@@ -386,7 +418,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         self.parallaxableController = .init()
         self.parallaxableController.delegate = self
     }
-
+    
     private var reusableHostingControllers: [UIViewController]?
     
     private var contentOffsetObservers: [(CGPoint) -> ()] = []
@@ -509,12 +541,12 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
 /// Once Apple removed `_UIHostingView`, we should replace implementation with `UIHostingController`.
 fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
     
-    /// In the hosting view for the parallaxable controller can't using any `safeAreaInsets`.
-    /// But `_UIHostingView/UIHostingController` can't understand our intention,
-    /// To fix this issue we must let to always return to zero of `_UIHostingView` the `safeAreaInsets`.
-    override var safeAreaInsets: UIEdgeInsets {
-        return .zero
-    }
+//    /// In the hosting view for the parallaxable controller can't using any `safeAreaInsets`.
+//    /// But `_UIHostingView/UIHostingController` can't understand our intention,
+//    /// To fix this issue we must let to always return to zero of `_UIHostingView` the `safeAreaInsets`.
+//    override var safeAreaInsets: UIEdgeInsets {
+//        return .zero
+//    }
     
 //    override func layoutSubviews() {
 //        super.layoutSubviews()

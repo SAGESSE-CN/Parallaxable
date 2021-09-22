@@ -49,16 +49,16 @@ import UIKit
     /// - Using `intrinsicContentSize.height` when `contentHuggingPriority` > 900.
     /// - Using `navigationBar.frame.height` when not match cases.
     @objc open var headerView: UIView? {
-        get { parallaxing.headerView }
-        set { parallaxing.headerView = newValue }
+        get { presentationView.headerView }
+        set { presentationView.headerView = newValue }
     }
     
     /// The view that displays below the header view.
     ///
     /// When assigning a view to this property, the view is auto self-height.
     @objc open var contentView: UIView? {
-        get { parallaxing.contentView }
-        set { parallaxing.contentView = newValue }
+        get { presentationView.contentView }
+        set { presentationView.contentView = newValue }
     }
     
     /// The view that displays below the content view.
@@ -66,8 +66,8 @@ import UIKit
     /// When assigning a view to this property, the view is auto self-height.
     /// unlike contentView the view is never exceeds headerView.
     @objc open var footerView: UIView? {
-        get { parallaxing.footerView }
-        set { parallaxing.footerView = newValue }
+        get { presentationView.footerView }
+        set { presentationView.footerView = newValue }
     }
     
     
@@ -90,19 +90,19 @@ import UIKit
                 return XCParallaxableItem(viewController, parallaxable: self)
             }
             // Update all items to components.
-            pagging.setItems(cachedItems, animated: false)
-            parallaxing.setItems(cachedItems, animated: false)
+            containerView.setItems(cachedItems, animated: false)
+            presentationView.setItems(cachedItems, animated: false)
         }
     }
     
     /// The extra distance that the parallaxing view is inset from the scrollable view edges.
     @objc open var contentInset: UIEdgeInsets {
-        get { parallaxing.contentInset }
+        get { presentationView.contentInset }
         set {
             performWithoutContentChanges {
-                parallaxing.contentInset = newValue
-                parallaxing.containerView.layoutIfNeeded()
-                parallaxing.layoutSubviews()
+                presentationView.contentInset = newValue
+                presentationView.layoutIfNeeded()
+                presentationView.updateContentSizeIfNeeded()
             }
         }
     }
@@ -122,6 +122,7 @@ import UIKit
         }
     }
     
+    /// Sets the offset at which the origin of the parallaxing view is offset from the origin of the parallaxable controller.
     @objc open func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
         updateContentOffset(contentOffset) {
             $0.setContentOffset($1, animated: animated)
@@ -131,13 +132,13 @@ import UIKit
     
     /// The index of the view controller associated with the currently selected page item.
     @objc open var selectedIndex: Int {
-        get { pagging.selectedIndex }
+        get { containerView.selectedIndex }
         set { setSelectedIndex(newValue, animated: false) }
     }
     
     /// The view controller associated with the currently selected page item.
     @objc open var selectedViewController: UIViewController? {
-        return pagging.selectedItem?.viewController
+        return containerView.selectedItem?.viewController
     }
     
     /// Update the index of the view controller associated with the new selected page item.
@@ -145,30 +146,30 @@ import UIKit
     /// - parameter animated: true to animate the transition at a constant velocity to the new index, false to make the transition immediate.
     @objc open func setSelectedIndex(_ selectedIndex: Int, animated: Bool) {
         // When content index not any changes or can't found view controller, ignore.
-        guard pagging.selectedIndex != selectedIndex, selectedIndex < pagging.items.count else {
+        guard containerView.selectedIndex != selectedIndex, selectedIndex < containerView.items.count else {
             return
         }
         performWithoutContentChanges {
-            pagging.setSelectedIndex(selectedIndex, animated: animated)
+            containerView.setSelectedIndex(selectedIndex, animated: animated)
         }
     }
     
     
     /// A Boolean value that determines whether content view are confined to the bounds of the parallaxing view.
     @objc open var isClipped: Bool {
-        get { parallaxing.isClipped }
-        set { parallaxing.isClipped = newValue }
+        get { presentationView.isClipped }
+        set { presentationView.isClipped = newValue }
     }
 
     
     /// The pagging container view associated with this controller.
     @objc open var paggingView: UIScrollView {
-        return pagging.containerView
+        return containerView
     }
     
     /// The parallaxing container view associated with this controller.
     @objc open var parallaxingView: UIView {
-        return parallaxing.containerView
+        return presentationView
     }
     
     
@@ -177,11 +178,9 @@ import UIKit
     
     
     open override func loadView() {
-        super.loadView()
-        
         // Must using WrapperView to base view, because when the `scrollableView.contentInset`
         // is nonzero, the `paggingView.frameLayoutGuide` is unexpected.
-        view = UIView.dynamicInit(name: "XCParallaxableWrapperView", frame: UIScreen.main.bounds)
+        view = XCParallaxableWrapperView(frame: UIScreen.main.bounds)
         
         // The containerView needs to using all area and automatically adapt to changes.
         paggingView.delegate = self
@@ -197,15 +196,15 @@ import UIKit
         // When the view controller is already displayed in the view hierarchy,
         // UIKit can't automatically forwarding to appearance methods of
         // child view controller the any opereations, so we must manually forwarding.
-        pagging.shouldForwardAppearanceMethods = true
+        containerView.shouldForwardAppearanceMethods = true
     }
     
     open override func viewWillDisappear(_ animated: Bool) {
         // In default UIKit will automatically forwarding appearance methods, but
         // UIKit can't forwarding at same time of multiple view controllers case,
         // so we must to cancel scroll restore to single view controller.
-        pagging.setSelectedIndex(selectedIndex, animated: false)
-        pagging.shouldForwardAppearanceMethods = false
+        containerView.setSelectedIndex(selectedIndex, animated: false)
+        containerView.shouldForwardAppearanceMethods = false
         
         // Continue forwarding appearance methods and process other handler.
         super.viewWillDisappear(animated)
@@ -232,7 +231,7 @@ import UIKit
 
         // Synchronize into parallaxing.
         performWithoutContentChangesIfNeeded {
-            parallaxing.itemSafeAreaInsets.top = view.safeAreaInsets.top - additionalSafeAreaInsets.top
+            presentationView.itemSafeAreaInsets.top = view.safeAreaInsets.top - additionalSafeAreaInsets.top
         }
     }
     
@@ -300,6 +299,7 @@ import UIKit
         updateContentChangesIfNeeded()
     }
     
+    
     /// Start the scroll animation if needed.
     fileprivate func beginScrollAnimation(_ animated: Bool) {
         // When locked staus not any changes, ignore.
@@ -323,7 +323,7 @@ import UIKit
     /// Gets vertical scrollable item with content offset.
     fileprivate func scrollableItem(at offset: CGPoint) -> XCParallaxableItem? {
         // Only item that are fully displayed can be vertical scrollable,
-        guard let item = pagging.selectedItem, fmod(offset.x, pagging.frame.width) == 0 else {
+        guard let item = containerView.selectedItem, fmod(offset.x, containerView.frame.width) == 0 else {
             return nil
         }
         return item
@@ -357,7 +357,7 @@ import UIKit
         // Process the conent size change event.
         if let _ = changes.remove(.contentSize) {
             // Quickly calculate the final result.
-            cachedContentSize = .init(width: pagging.contentSize.width, height: parallaxing.contentSize.height)
+            cachedContentSize = .init(width: containerView.contentSize.width, height: presentationView.contentSize.height)
             
             // Tells the user the current size is changed.
             delegate?.parallaxableController?(self, didChangeContentSize: cachedContentSize)
@@ -366,7 +366,7 @@ import UIKit
         // Process the conent offset change event.
         if let _ = changes.remove(.contentOffset) {
             // Quickly calculate the final result.
-            cachedContentOffset = .init(x: pagging.contentOffset.x, y: parallaxing.contentOffset.y)
+            cachedContentOffset = .init(x: containerView.contentOffset.x, y: presentationView.contentOffset.y)
             
             // Tells the user the current offset is changed.
             delegate?.parallaxableController?(self, didChangeContentOffset: cachedContentOffset)
@@ -394,7 +394,7 @@ import UIKit
             }
             // First synchronization when vertical content changes.
             let dy = newValue.y - cachedContentOffset.y
-            if dy != 0, let scrollView = pagging.selectedItem?.scrollViewIfLoaded {
+            if dy != 0, let scrollView = containerView.selectedItem?.scrollViewIfLoaded {
                 var contentOffset = scrollView.contentOffset
                 contentOffset.y = newValue.y - scrollView.adjustedContentInset.top
                 updater(scrollView, contentOffset)
@@ -406,17 +406,21 @@ import UIKit
     /// The horizontal content offset is changed.
     fileprivate func updateHorizontalContentOffsetIfNeeded() {
         performWithoutContentChanges {
-            pagging.layoutSubviews()
-            pagging.setSelectedIndex(pagging.contentOffset, animated: false)
-            parallaxing.move(to: scrollableItem(at: pagging.contentOffset))
+            containerView.updateItemLayouts()
+            containerView.setSelectedIndex(containerView.contentOffset, animated: false)
+            presentationView.move(toSuperview: scrollableItem(at: containerView.contentOffset))
         }
     }
     /// The vertical content offset is changed.
     fileprivate func updateVerticalContentOffsetIfNeeded() {
         performWithoutContentChanges {
-            parallaxing.layoutSubviews()
-            parallaxing.setContentOffset(pagging.selectedItem, animated: false)
+            presentationView.updateContentSizeIfNeeded()
+            presentationView.setContentOffset(containerView.selectedItem, animated: false)
         }
+    }
+    
+    deinit {
+        presentationView.move(toSuperview: nil)
     }
     
     private var changes: XCParallaxableChangeEvent = []
@@ -428,6 +432,8 @@ import UIKit
     
     private var isAutomaticallyLinking: Bool = false
     
+    private var tableViewTracker: Any?
+    
     private var cachedSize: CGSize?
     private var cachedVisibleSize: CGSize?
     private var cachedVisibleMargins: UIEdgeInsets?
@@ -437,8 +443,540 @@ import UIKit
     
     private var cachedItems: [XCParallaxableItem] = []
         
-    fileprivate lazy var pagging: XCParallaxablePagging = .init(self)
-    fileprivate lazy var parallaxing: XCParallaxableParallaxing = .init(self)
+    fileprivate lazy var containerView: XCParallaxableContainerView = .init(self)
+    fileprivate lazy var presentationView: XCParallaxablePresentationView = .init(self)
+}
+
+
+// MARK: -
+
+
+@objc(XCParallaxableWrapperView)
+fileprivate class XCParallaxableWrapperView: UIView {
+    
+}
+
+
+// MARK: -
+
+
+@objc(XCParallaxableContainerView)
+fileprivate class XCParallaxableContainerView: UIScrollView {
+    
+    /// When the child view controller changes, the lifecycle is automatically managed
+    var shouldForwardAppearanceMethods: Bool = false
+    
+    /// The all managed items with added to view controller of parallaxable controller.
+    var items: [XCParallaxableItem] = []
+    /// Update the all managed items with added to view controller of parallaxable controller.
+    func setItems(_ newValue: [XCParallaxableItem], animated: Bool) {
+        // Remove all expired items.
+        items.filter { !newValue.contains($0) }.forEach {
+            // Don't remove view when view controller view is not loaded.
+            $0.viewController.viewIfLoaded?.removeFromSuperview()
+            $0.viewController.removeFromParent()
+        }
+        // When the view has been loaded, recalculate the content size.
+        items = newValue
+        setNeedsLayout()
+        parallaxable.setNeedsStatusBarAppearanceUpdate()
+        cachedSize = nil
+    }
+
+    /// The selected index for selected item.
+    var selectedIndex: Int {
+        get { visabledIndex }
+        set {
+            // When the newValue not any changes, ignore.
+            guard newValue != visabledIndex, newValue < items.count, newValue >= 0 else {
+                return
+            }
+            visabledIndex = newValue
+            parallaxable.setNeedsUpdateSelected()
+        }
+    }
+    /// Update selected item with index.
+    func setSelectedIndex(_ newValue: Int, animated: Bool) {
+        // When the view is not loaded, wait until view did load.
+        guard parallaxable.isViewLoaded else {
+            visabledIndex = newValue
+            return
+        }
+        // When the index can't found content, ignore.
+        guard newValue < items.count else {
+            return
+        }
+        // Update the content offset for selected index.
+        var newContentOffset = contentOffset
+        newContentOffset.x = frame.width * .init(newValue)
+        parallaxable.beginScrollAnimation(animated)
+        setContentOffset(newContentOffset, animated: animated)
+        
+        // When setContentOffset with a animation, this a progressive process,
+        // using contentOffset to gets the real-time offset.
+        setSelectedIndex(contentOffset, animated: false)
+    }
+    /// Update selected content with content offset.
+    func setSelectedIndex(_ newValue: CGPoint, animated: Bool) {
+        // When the offset not any changes, ignore.
+        guard !items.isEmpty, cachedOffset?.x != newValue.x else {
+            return
+        }
+        // Update visbles view controllers.
+        updateItemLayouts(for: newValue)
+        
+        // Update the visable item for content offset.
+        selectedIndex = .init(round(newValue.x / frame.width))
+    }
+    
+    /// The selected content of user.
+    var selectedItem: XCParallaxableItem? {
+        return item(at: selectedIndex)
+    }
+
+    /// Update the subviews layout of contents.
+    func updateItemLayouts() {
+        // When the frame is not any chagnes, ignore.
+        let size = frame.size
+        guard size.width != cachedSize?.width else {
+            return
+        }
+        cachedSize = size
+        items.enumerated().forEach {
+            $1.frame = CGRect(x: size.width * .init($0), y: 0, width: size.width, height: size.height)
+        }
+        // When the content size not any chagnes, ignore.
+        let newContentSize = CGSize(width: size.width * .init(items.count), height: 0)
+        guard newContentSize.width != contentSize.width else {
+            return
+        }
+        contentSize = newContentSize
+        parallaxable.setNeedsUpdateContentSize()
+        
+        // When the content size is changes, restore the content offset.
+        setSelectedIndex(selectedIndex, animated: false)
+    }
+    /// Update the subviews layout of visable rect.
+    func updateItemLayouts(for offset: CGPoint) {
+        // When the contens is empty, ignore.
+        let count = items.count
+        guard count != 0 else {
+            return
+        }
+        // Cached the last offset for reduces the invalid calls.
+        cachedOffset = offset
+        parallaxable.setNeedsUpdateContentOffset()
+        
+        // Computes the currently visible controller.
+        let newTransition = offset.x / max(frame.width, 1)
+        let newValue = min(Int(trunc(newTransition)), count - 1) ... min(Int(ceil(newTransition)), count - 1)
+        
+        // When the range not any changes, ignore.
+        guard visibledIndexes != newValue else {
+            return
+        }
+        // Calculate the add or remove of the view controller.
+        let newItems = newValue.filter { !(visibledIndexes?.contains($0) ?? false) }
+        let removeItems = visibledIndexes?.filter { !newValue.contains($0) } ?? []
+        let currentItems = visibledIndexes?.filter { !appearing.contains($0) && !disappearing.contains($0) } ?? []
+        
+        // Update current visable indexs.
+        visibledIndexes = newValue
+        
+        // When has a new item, content will add to appearing queue.
+        for index in newItems {
+            appearing.append(index)
+            forwardItem(at: index)?.willAppear(false)
+        }
+        // Pages start disappear.
+        for index in currentItems {
+            disappearing.append(index)
+            forwardItem(at: index)?.willDisappear(false)
+        }
+        
+        // Remove the invisible controller.
+        for index in removeItems {
+            item(at: index).map {
+                $0.viewController.willMove(toParent: nil)
+                $0.viewController.viewIfLoaded?.removeFromSuperview()
+                $0.viewController.setNeedsStatusBarAppearanceUpdate()
+                $0.viewController.removeFromParent()
+            }
+        }
+        // Add visable view contorller.
+        for index in newItems {
+            item(at: index).map {
+                parallaxable.addChild($0.viewController)
+                $0.move(to: self)
+                $0.viewController.didMove(toParent: parallaxable)
+                $0.viewController.setNeedsStatusBarAppearanceUpdate()
+            }
+        }
+        
+        // Pages end appear.
+        for index in newValue where newValue.count == 1 {
+            disappearing.firstIndex(of: index).map {
+                disappearing.remove(at: $0)
+                forwardItem(at: index)?.willAppear(false)
+                forwardItem(at: index)?.didAppear(false)
+            }
+            appearing.firstIndex(of: index).map {
+                appearing.remove(at: $0)
+                forwardItem(at: index)?.didAppear(false)
+            }
+        }
+        // Pages end disappear.
+        for index in removeItems {
+            appearing.firstIndex(of: index).map {
+                appearing.remove(at: $0)
+                forwardItem(at: index)?.willDisappear(false)
+                forwardItem(at: index)?.didDisappear(false)
+            }
+            disappearing.firstIndex(of: index).map {
+                disappearing.remove(at: $0)
+                forwardItem(at: index)?.didDisappear(false)
+            }
+        }
+    }
+    
+    /// Gets the content at index.
+    private func item(at index: Int) -> XCParallaxableItem? {
+        // When index is over boundary, ignore.
+        guard index < items.count else {
+            return nil
+        }
+        return items[index]
+    }
+    /// Get the appearancable content at index.
+    private func forwardItem(at index: Int) -> XCParallaxableItem? {
+        // When automatic forwarding for child view controller is off, ignore.
+        guard shouldForwardAppearanceMethods else {
+            return nil
+        }
+        return item(at: index)
+    }
+    
+    /// Create a custom pagging manager.
+    init(_ parallaxable: XCParallaxableController) {
+        // The association must bind at init.
+        self.parallaxable = parallaxable
+        super.init(frame: .zero)
+        
+        // Configure the pagging view.
+        self.isOpaque = true
+        self.isPagingEnabled = true
+        self.isDirectionalLockEnabled = true
+        self.scrollsToTop = false
+        self.clipsToBounds = true
+        self.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        self.showsVerticalScrollIndicator = false
+        self.showsHorizontalScrollIndicator = false
+        
+        // In the iPhone X of landscape mode, this is the wrong behavior.
+        self.contentInsetAdjustmentBehavior = .never
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private var appearing: [Int] = []
+    private var disappearing: [Int] = []
+    
+    private var cachedSize: CGSize?
+    private var cachedOffset: CGPoint?
+    
+    private var visabledIndex: Int = 0
+    private var visibledIndexes: ClosedRange<Int>?
+    
+    private unowned(unsafe) let parallaxable: XCParallaxableController
+}
+
+
+// MARK: -
+
+
+@objc(XCParallaxablePresentationView)
+fileprivate class XCParallaxablePresentationView: UIView {
+    
+    /// The header view of parallaxing view.
+    var headerView: UIView? {
+        didSet {
+            updateSubview(headerView, from: oldValue, layoutGuide: &topLayoutGuide)
+        }
+    }
+    /// The contnet view of parallaxing view.
+    var contentView: UIView? {
+        didSet {
+            oldValue?.mask = nil
+            updateSubview(contentView, from: oldValue, layoutGuide: &contentLayoutGuide)
+            contentView.map {
+                sendSubviewToBack($0)
+                $0.mask = buildMaskView(isClipped)
+            }
+        }
+    }
+    /// The footer view of parallaxing view.
+    var footerView: UIView? {
+        didSet {
+            updateSubview(footerView, from: oldValue, layoutGuide: &bottomLayoutGuide)
+        }
+    }
+
+    /// The all managed items with added to view controller of parallaxable controller.
+    var items: [XCParallaxableItem] = []
+    /// Update the all managed items with added to view controller of parallaxable controller.
+    func setItems(_ newValue: [XCParallaxableItem], animated: Bool) {
+        items = newValue
+        items.forEach {
+            $0.updateScrollViewIfNeeded()
+        }
+    }
+    
+    /// A Boolean value that determines whether content view are confined to the bounds of the parallaxing view.
+    var isClipped: Bool = false {
+        willSet {
+            contentView?.mask = buildMaskView(newValue)
+        }
+    }
+    
+    /// The insets that you use to determine the safe area for parallaxing view.
+    var itemSafeAreaInsets: UIEdgeInsets = .zero {
+        didSet {
+            // When the safeAreaInsets is changes, must synchronize to all contents.
+            guard itemSafeAreaInsets != oldValue else {
+                return
+            }
+            navigationLayoutConstraint.constant = itemSafeAreaInsets.top
+        }
+    }
+    /// The extra distance that the parallaxing view is inset from the scrollable view edges.
+    var itemContentInset: UIEdgeInsets = .zero {
+        didSet {
+            // When the contentInset not any changes, ignore.
+            guard itemContentInset != oldValue else {
+                return
+            }
+            parallaxable.additionalSafeAreaInsets.top = itemContentInset.top - itemSafeAreaInsets.top
+        }
+    }
+    
+    /// The extra distance that the parallaxing view is inset from the scrollable view edges.
+    var contentInset: UIEdgeInsets {
+        get { contentLayoutGuide.contentInset }
+        set { contentLayoutGuide.contentInset = newValue }
+    }
+    
+    /// The size of scrollable content of parallaxing view.
+    var contentSize: CGSize = .zero
+    /// The point at which the origin of the parallaxing view is offset from the origin of the parallaxable controller.
+    var contentOffset: CGPoint = .zero {
+        willSet {
+            // When te content offset not any changes, ignore.
+            guard newValue != contentOffset else {
+                return
+            }
+            contentMaskView?.transform = .init(translationX: 0, y: newValue.y)
+            offsetLayoutConstraint.constant = -newValue.y
+            performWithoutContentChanges {
+                $0.updateScrollDecorationTop(newValue.y)
+                $0.updateScrollIndicatorTop(newValue.y)
+            }
+        }
+    }
+    /// Sets the offset from the origin that corresponds of the parallaxing view from the origin of the parallaxable controller.
+    func setContentOffset(_ newValue: XCParallaxableItem?, animated: Bool) {
+        // When the current scroll view not found, ignore.
+        guard let scrollView = newValue?.scrollViewIfLoaded else {
+            return
+        }
+        let newValue = min(scrollView.contentOffset.y + scrollView.adjustedContentInset.top, contentSize.height)
+        guard newValue != contentOffset.y else {
+            return
+        }
+        contentOffset.y = newValue
+        parallaxable.setNeedsUpdateContentOffset()
+    }
+
+    /// A Boolean value that indicates whether has begun should render.
+    var shouldRenderInHierarchy: Bool {
+        return headerView != nil || contentView != nil || footerView != nil
+    }
+    
+    /// In the header/content/footer view for the parallaxable controller can't using any `safeAreaInsets`.
+    override var safeAreaInsets: UIEdgeInsets {
+        return .zero
+    }
+    
+    /// Perform something should not trigger the content changes.
+    private func performWithoutContentChanges(_ actions: (XCParallaxableItem) -> Void) {
+        parallaxable.performWithoutContentChanges {
+            items.forEach(actions)
+        }
+    }
+        
+    /// Move item to scrollable view
+    func move(toSuperview item: XCParallaxableItem?) {
+        // When the contanier is not ready, ignore.
+        guard shouldRenderInHierarchy else {
+            removeFromSuperview()
+            updateActivedItem(nil)
+            return
+        }
+        // When the scrollable view not found, revert to the superview.
+        let newSuperview = item?.scrollViewIfLoaded ?? parallaxable.paggingView
+        guard newSuperview !== superview else {
+            return
+        }
+        // Remove superview will clean all related constraints.
+        removeFromSuperview()
+        newSuperview.addSubview(self)
+        updateContentSizeIfNeeded()
+        updateActivedItem(item)
+
+        // Always pinned the container to superview.
+        NSLayoutConstraint.activate(
+            [
+                topAnchor.constraint(equalTo: parallaxable.view.topAnchor),
+                leftAnchor.constraint(equalTo: parallaxable.view.leftAnchor),
+                rightAnchor.constraint(equalTo: parallaxable.view.rightAnchor),
+            ]
+        )
+    }
+    
+    /// Update the subviews layout of contents.
+    func updateContentSizeIfNeeded() {
+        // When container height is zero, which means that containerView is not initialize.
+        // we just simply calculate the actual contentSize.
+        let newContainerHeight = frame.height
+        guard newContainerHeight != cachedContainerHeight || newContainerHeight == 0 else {
+            return
+        }
+        cachedContainerHeight = newContainerHeight
+
+        // Calculate all the layoutGuides frame information.
+        let topLayoutFrame = topLayoutGuide.layoutFrame
+        let bottomLayoutFrame = bottomLayoutGuide.layoutFrame
+        let contentLayoutFrame = contentLayoutGuide.layoutFrame
+        
+        // When the content inset not any changes, ignore.
+        let top = topLayoutFrame.height + contentLayoutFrame.height + bottomLayoutFrame.height
+        guard top != itemContentInset.top else {
+            return
+        }
+        itemContentInset.top = top
+
+        // When the content size not any change, ignore.
+        let newConetntHeight = contentLayoutFrame.height
+        guard newConetntHeight != contentSize.height else {
+            return
+        }
+        contentSize.height = newConetntHeight
+        parallaxable.setNeedsUpdateContentSize()
+    }
+    private func updateActivedItem(_ newValue: XCParallaxableItem?) {
+        guard cacedActivedItem != newValue else {
+            return
+        }
+        cacedActivedItem?.removeObservers()
+        cacedActivedItem = newValue
+        cacedActivedItem?.addObservers()
+    }
+    
+    /// Update the subview of the layout guide.
+    private func updateSubview(_ newValue: UIView?, from oldValue: UIView?, layoutGuide: inout XCParallaxableInsetLayoutGuide) {
+        // When the view not any changes, ignore.
+        guard newValue !== oldValue else {
+            return
+        }
+        
+        // Must remove the old view before add a new view.
+        oldValue?.removeFromSuperview()
+        
+        // When the new value is empty, ignore.
+        guard let newValue = newValue else {
+            return
+        }
+        
+        // Remove from superview to clean all related constraints.
+        newValue.removeFromSuperview()
+        newValue.translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(newValue)
+        addConstraints(layoutGuide.constraints(insetTo: newValue))
+    }
+    
+    /// Update the make view.
+    private func buildMaskView(_ isClipped: Bool) -> UIView? {
+        // When clipped is disable, clear the mask view.
+        if !isClipped {
+            contentMaskView = nil
+            return nil
+        }
+        // When mask is hit, reuse it.
+        guard contentMaskView == nil else {
+            return contentMaskView
+        }
+        // Build a new mask view.
+        let width = max(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+        let view = UIView(frame: .init(x: 0, y: 0, width: width, height: width))
+        view.backgroundColor = .black
+        view.transform = .init(translationX: 0, y: contentOffset.y)
+        contentMaskView = view
+        return view
+    }
+    
+    /// Create a custom pagging manager.
+    init(_ parallaxable: XCParallaxableController) {
+        // The association must bind at init.
+        self.parallaxable = parallaxable
+        super.init(frame: .zero)
+
+        self.clipsToBounds = true
+        self.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        self.translatesAutoresizingMaskIntoConstraints = false
+        self.layer.zPosition = 1000
+
+        self.navigationLayoutConstraint.priority = .required - 100
+        self.offsetLayoutConstraint.priority = .required - 200
+        
+        NSLayoutConstraint.activate(
+            [
+                topLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
+                topLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+                topLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+
+                bottomLayoutGuide.topAnchor.constraint(greaterThanOrEqualTo: topLayoutGuide.bottomAnchor),
+                bottomLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+                bottomLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+                bottomLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+                contentLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+                contentLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+                contentLayoutGuide.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor),
+
+                offsetLayoutConstraint,
+                navigationLayoutConstraint,
+            ]
+        )
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private var cachedContainerHeight: CGFloat?
+    private var contentMaskView: UIView?
+    private var cacedActivedItem: XCParallaxableItem?
+
+    private lazy var topLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
+    private lazy var bottomLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
+    private lazy var contentLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
+    
+    private lazy var navigationLayoutConstraint: NSLayoutConstraint = topLayoutGuide.heightAnchor.constraint(equalToConstant: 0)
+    private lazy var offsetLayoutConstraint: NSLayoutConstraint = contentLayoutGuide.topAnchor.constraint(equalTo: topLayoutGuide.bottomAnchor)
+    
+    private unowned(unsafe) let parallaxable: XCParallaxableController
 }
 
 
@@ -650,7 +1188,7 @@ fileprivate final class XCParallaxableItem: Equatable {
         
         // Apply current all changes to scrollabe view
         newValue.map { _ in
-            let contentOffset = parallaxable.parallaxing.contentOffset
+            let contentOffset = parallaxable.presentationView.contentOffset
             updateScrollDecorationTop(contentOffset.y)
             updateScrollIndicatorTop(contentOffset.y)
             if needRestoreObservering {
@@ -674,7 +1212,12 @@ fileprivate final class XCParallaxableItem: Equatable {
             return source.collectionView
             
         case let source as AnyObject where hasContentScrollView:
-            return source.contentScrollView()
+            // If the target is `XCParallaxableContainerView` suggesting that this is a nested parallaxable controller,
+            // just to disable parent parallaxable controller vertical scroll.
+            guard let scrollView = source.contentScrollView(), !(scrollView is XCParallaxableContainerView) else {
+                return nil
+            }
+            return scrollView
             
         default:
             return nil
@@ -743,574 +1286,6 @@ fileprivate extension XCParallaxableItem {
 
 
 @dynamicMemberLookup
-fileprivate final class XCParallaxablePagging<Item, ContainerView> where Item: XCParallaxableItem, ContainerView: UIScrollView {
-    
-    /// When the child view controller changes, the lifecycle is automatically managed
-    var shouldForwardAppearanceMethods: Bool = false
-    
-    /// The container of displaying content.
-    let containerView: ContainerView
-    
-    /// The all managed items with added to view controller of parallaxable controller.
-    var items: [Item] = []
-    /// Update the all managed items with added to view controller of parallaxable controller.
-    func setItems(_ newValue: [Item], animated: Bool) {
-        // Remove all expired items.
-        items.filter { !newValue.contains($0) }.forEach {
-            // Don't remove view when view controller view is not loaded.
-            $0.viewController.viewIfLoaded?.removeFromSuperview()
-            $0.viewController.removeFromParent()
-        }
-        // When the view has been loaded, recalculate the content size.
-        items = newValue
-        containerView.setNeedsLayout()
-        parallaxable.setNeedsStatusBarAppearanceUpdate()
-        cachedSize = nil
-    }
-
-    /// The selected index for selected item.
-    var selectedIndex: Int {
-        get { visabledIndex }
-        set {
-            // When the newValue not any changes, ignore.
-            guard newValue != visabledIndex, newValue < items.count, newValue >= 0 else {
-                return
-            }
-            visabledIndex = newValue
-            parallaxable.setNeedsUpdateSelected()
-        }
-    }
-    /// Update selected item with index.
-    func setSelectedIndex(_ newValue: Int, animated: Bool) {
-        // When the view is not loaded, wait until view did load.
-        guard parallaxable.isViewLoaded else {
-            visabledIndex = newValue
-            return
-        }
-        // When the index can't found content, ignore.
-        guard newValue < items.count else {
-            return
-        }
-        // Update the content offset for selected index.
-        var newContentOffset = containerView.contentOffset
-        newContentOffset.x = containerView.frame.width * .init(newValue)
-        parallaxable.beginScrollAnimation(animated)
-        containerView.setContentOffset(newContentOffset, animated: animated)
-        
-        // When setContentOffset with a animation, this a progressive process,
-        // using contentOffset to gets the real-time offset.
-        setSelectedIndex(containerView.contentOffset, animated: false)
-    }
-    /// Update selected content with content offset.
-    func setSelectedIndex(_ newValue: CGPoint, animated: Bool) {
-        // When the offset not any changes, ignore.
-        guard !items.isEmpty, cachedOffset?.x != newValue.x else {
-            return
-        }
-        // Update visbles view controllers.
-        layoutSubviews(for: newValue)
-        
-        // Update the visable item for content offset.
-        selectedIndex = .init(round(newValue.x / containerView.frame.width))
-    }
-    
-    /// The selected content of user.
-    var selectedItem: Item? {
-        return item(at: selectedIndex)
-    }
-
-    /// Forward getter to the container.
-    subscript<Value>(dynamicMember keyPath: KeyPath<ContainerView, Value>) -> Value {
-        get { containerView[keyPath: keyPath] }
-    }
-    /// Forward setter/getter to the container.
-    subscript<Value>(dynamicMember keyPath: ReferenceWritableKeyPath<ContainerView, Value>) -> Value {
-        get { containerView[keyPath: keyPath] }
-        set { containerView[keyPath: keyPath] = newValue }
-    }
-    
-    /// Update the subviews layout of contents.
-    func layoutSubviews() {
-        // When the frame is not any chagnes, ignore.
-        let size = containerView.frame.size
-        guard size.width != cachedSize?.width else {
-            return
-        }
-        cachedSize = size
-        items.enumerated().forEach {
-            $1.frame = CGRect(x: size.width * .init($0), y: 0, width: size.width, height: size.height)
-        }
-        // When the content size not any chagnes, ignore.
-        let newContentSize = CGSize(width: size.width * .init(items.count), height: 0)
-        guard newContentSize.width != containerView.contentSize.width else {
-            return
-        }
-        containerView.contentSize = newContentSize
-        parallaxable.setNeedsUpdateContentSize()
-        
-        // When the content size is changes, restore the content offset.
-        setSelectedIndex(selectedIndex, animated: false)
-    }
-    /// Update the subviews layout of visable rect.
-    func layoutSubviews(for offset: CGPoint) {
-        // When the contens is empty, ignore.
-        let count = items.count
-        guard count != 0 else {
-            return
-        }
-        // Cached the last offset for reduces the invalid calls.
-        cachedOffset = offset
-        parallaxable.setNeedsUpdateContentOffset()
-        
-        // Computes the currently visible controller.
-        let newTransition = offset.x / max(containerView.frame.width, 1)
-        let newValue = min(Int(trunc(newTransition)), count - 1) ... min(Int(ceil(newTransition)), count - 1)
-        
-        // When the range not any changes, ignore.
-        guard visibledIndexes != newValue else {
-            return
-        }
-        // Calculate the add or remove of the view controller.
-        let newItems = newValue.filter { !(visibledIndexes?.contains($0) ?? false) }
-        let removeItems = visibledIndexes?.filter { !newValue.contains($0) } ?? []
-        let currentItems = visibledIndexes?.filter { !appearing.contains($0) && !disappearing.contains($0) } ?? []
-        
-        // Update current visable indexs.
-        visibledIndexes = newValue
-        
-        // When has a new item, content will add to appearing queue.
-        for index in newItems {
-            appearing.append(index)
-            forwardItem(at: index)?.willAppear(false)
-        }
-        // Pages start disappear.
-        for index in currentItems {
-            disappearing.append(index)
-            forwardItem(at: index)?.willDisappear(false)
-        }
-        
-        // Remove the invisible controller.
-        for index in removeItems {
-            item(at: index).map {
-                $0.viewController.willMove(toParent: nil)
-                $0.viewController.viewIfLoaded?.removeFromSuperview()
-                $0.viewController.setNeedsStatusBarAppearanceUpdate()
-                $0.viewController.removeFromParent()
-            }
-        }
-        // Add visable view contorller.
-        for index in newItems {
-            item(at: index).map {
-                parallaxable.addChild($0.viewController)
-                $0.move(to: containerView)
-                $0.viewController.didMove(toParent: parallaxable)
-                $0.viewController.setNeedsStatusBarAppearanceUpdate()
-            }
-        }
-        
-        // Pages end appear.
-        for index in newValue where newValue.count == 1 {
-            disappearing.firstIndex(of: index).map {
-                disappearing.remove(at: $0)
-                forwardItem(at: index)?.willAppear(false)
-                forwardItem(at: index)?.didAppear(false)
-            }
-            appearing.firstIndex(of: index).map {
-                appearing.remove(at: $0)
-                forwardItem(at: index)?.didAppear(false)
-            }
-        }
-        // Pages end disappear.
-        for index in removeItems {
-            appearing.firstIndex(of: index).map {
-                appearing.remove(at: $0)
-                forwardItem(at: index)?.willDisappear(false)
-                forwardItem(at: index)?.didDisappear(false)
-            }
-            disappearing.firstIndex(of: index).map {
-                disappearing.remove(at: $0)
-                forwardItem(at: index)?.didDisappear(false)
-            }
-        }
-    }
-    
-    /// Gets the content at index.
-    private func item(at index: Int) -> Item? {
-        // When index is over boundary, ignore.
-        guard index < items.count else {
-            return nil
-        }
-        return items[index]
-    }
-    /// Get the appearancable content at index.
-    private func forwardItem(at index: Int) -> Item? {
-        // When automatic forwarding for child view controller is off, ignore.
-        guard shouldForwardAppearanceMethods else {
-            return nil
-        }
-        return item(at: index)
-    }
-    
-    /// Create a custom pagging manager.
-    init(_ parallaxable: XCParallaxableController) {
-        // The association must bind at init.
-        self.parallaxable = parallaxable
-        
-        // Configure the pagging view.
-        self.containerView = ContainerView.dynamicInit(name: "XCParallaxableContainerView", frame: .zero)
-        self.containerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        self.containerView.isOpaque = true
-        self.containerView.isPagingEnabled = true
-        self.containerView.isDirectionalLockEnabled = true
-        self.containerView.scrollsToTop = false
-        self.containerView.clipsToBounds = true
-        self.containerView.showsVerticalScrollIndicator = false
-        self.containerView.showsHorizontalScrollIndicator = false
-        
-        // In the iPhone X of landscape mode, this is the wrong behavior.
-        self.containerView.contentInsetAdjustmentBehavior = .never
-    }
-    
-    private var appearing: [Int] = []
-    private var disappearing: [Int] = []
-    
-    private var cachedSize: CGSize?
-    private var cachedOffset: CGPoint?
-    
-    private var visabledIndex: Int = 0
-    private var visibledIndexes: ClosedRange<Int>?
-    
-    private unowned(unsafe) let parallaxable: XCParallaxableController
-}
-
-
-// MARK: -
-
-
-@dynamicMemberLookup
-fileprivate final class XCParallaxableParallaxing<Item, ContainerView> where Item: XCParallaxableItem, ContainerView: UIView {
-    
-    /// The container of displaying content.
-    let containerView: ContainerView
-    
-    /// The header view of parallaxing view.
-    var headerView: UIView? {
-        willSet {
-            updateSubview(newValue, from: headerView, layoutGuide: &topLayoutGuide)
-        }
-    }
-    /// The contnet view of parallaxing view.
-    var contentView: UIView? {
-        willSet {
-            contentView?.mask = nil
-            updateSubview(newValue, from: contentView, layoutGuide: &contentLayoutGuide)
-            newValue.map {
-                containerView.sendSubviewToBack($0)
-                $0.mask = buildMaskView(isClipped)
-            }
-        }
-    }
-    /// The footer view of parallaxing view.
-    var footerView: UIView? {
-        willSet {
-            updateSubview(newValue, from: footerView, layoutGuide: &bottomLayoutGuide)
-        }
-    }
-
-    /// The all managed items with added to view controller of parallaxable controller.
-    var items: [Item] = []
-    /// Update the all managed items with added to view controller of parallaxable controller.
-    func setItems(_ newValue: [Item], animated: Bool) {
-        items = newValue
-        items.forEach {
-            $0.updateScrollViewIfNeeded()
-        }
-    }
-    
-    /// A Boolean value that determines whether content view are confined to the bounds of the parallaxing view.
-    var isClipped: Bool = false {
-        willSet {
-            contentView?.mask = buildMaskView(newValue)
-        }
-    }
-    
-    /// The insets that you use to determine the safe area for parallaxing view.
-    var itemSafeAreaInsets: UIEdgeInsets = .zero {
-        didSet {
-            // When the safeAreaInsets is changes, must synchronize to all contents.
-            guard itemSafeAreaInsets != oldValue else {
-                return
-            }
-            navigationLayoutConstraint.constant = itemSafeAreaInsets.top
-        }
-    }
-    /// The extra distance that the parallaxing view is inset from the scrollable view edges.
-    var itemContentInset: UIEdgeInsets = .zero {
-        didSet {
-            // When the contentInset not any changes, ignore.
-            guard itemContentInset != oldValue else {
-                return
-            }
-            parallaxable.additionalSafeAreaInsets.top = itemContentInset.top - itemSafeAreaInsets.top
-        }
-    }
-    
-    /// The extra distance that the parallaxing view is inset from the scrollable view edges.
-    var contentInset: UIEdgeInsets {
-        get { contentLayoutGuide.contentInset }
-        set { contentLayoutGuide.contentInset = newValue }
-    }
-    
-    /// The size of scrollable content of parallaxing view.
-    var contentSize: CGSize = .zero
-    /// The point at which the origin of the parallaxing view is offset from the origin of the parallaxable controller.
-    var contentOffset: CGPoint = .zero {
-        willSet {
-            // When te content offset not any changes, ignore.
-            guard newValue != contentOffset else {
-                return
-            }
-            cachedMaskView?.transform = .init(translationX: 0, y: newValue.y)
-            offsetLayoutConstraint.constant = -newValue.y
-            performWithoutContentChanges {
-                $0.updateScrollDecorationTop(newValue.y)
-                $0.updateScrollIndicatorTop(newValue.y)
-            }
-        }
-    }
-    /// Sets the offset from the origin that corresponds of the parallaxing view from the origin of the parallaxable controller.
-    func setContentOffset(_ newValue: Item?, animated: Bool) {
-        // When the current scroll view not found, ignore.
-        guard let scrollView = newValue?.scrollViewIfLoaded else {
-            return
-        }
-        let newValue = min(scrollView.contentOffset.y + scrollView.adjustedContentInset.top, contentSize.height)
-        guard newValue != contentOffset.y else {
-            // When content offset changes, must need to bring the container view in the front.
-            bringSubviewToFrontIfNeeded()
-            return
-        }
-        contentOffset.y = newValue
-        parallaxable.setNeedsUpdateContentOffset()
-    }
-
-    /// A Boolean value that indicates whether has begun should render.
-    var shouldRenderInHierarchy: Bool {
-        return headerView != nil || contentView != nil || footerView != nil
-    }
-    
-    /// Gets the container view index from superview.
-    var actualViewIndex: Int {
-        guard let superview = containerView.superview else {
-            return 0
-        }
-        let subviews = superview.subviews
-        guard let index = subviews.lastIndex(of: containerView) else {
-            return 0
-        }
-        return subviews.count - index - 1
-    }
-    
-    /// Perform something should not trigger the content changes.
-    private func performWithoutContentChanges(_ actions: (Item) -> Void) {
-        parallaxable.performWithoutContentChanges {
-            items.forEach(actions)
-        }
-    }
-    
-    /// Forward getter to the container.
-    subscript<Value>(dynamicMember keyPath: KeyPath<ContainerView, Value>) -> Value {
-        get { containerView[keyPath: keyPath] }
-    }
-    /// Forward getter to the container.
-    subscript<Value>(dynamicMember keyPath: ReferenceWritableKeyPath<ContainerView, Value>) -> Value {
-        get { containerView[keyPath: keyPath] }
-        set { containerView[keyPath: keyPath] = newValue }
-    }
-    
-    /// Move item to scrollable view
-    func move(to item: Item?) {
-        // When the contanier is not ready, ignore.
-        guard shouldRenderInHierarchy else {
-            // TODO: removeFromSuperview and cache
-            activedItem = nil
-            return
-        }
-        // When the scrollable view not found, revert to the superview.
-        let newSuperview = item?.scrollViewIfLoaded ?? parallaxable.paggingView
-        guard newSuperview !== containerView.superview else {
-            return
-        }
-        // Remove superview will clean all related constraints.
-        containerView.removeFromSuperview()
-        newSuperview.addSubview(containerView)
-        layoutSubviews()
-        
-        // Update the observers
-        activedItem = item
-        cachedLayerIndex = actualViewIndex
-
-        // Always pinned the container to superview.
-        NSLayoutConstraint.activate(
-            [
-                containerView.topAnchor.constraint(equalTo: parallaxable.view.topAnchor),
-                containerView.leftAnchor.constraint(equalTo: parallaxable.view.leftAnchor),
-                containerView.rightAnchor.constraint(equalTo: parallaxable.view.rightAnchor),
-            ]
-        )
-    }
-    
-    /// Update the subviews layout of contents.
-    func layoutSubviews() {
-        // When container height is zero, which means that containerView is not initialize.
-        // we just simply calculate the actual contentSize.
-        let newContainerHeight = containerView.frame.height
-        guard newContainerHeight != cachedContainerHeight || newContainerHeight == 0 else {
-            return
-        }
-        cachedContainerHeight = newContainerHeight
-
-        // Calculate all the layoutGuides frame information.
-        let topLayoutFrame = topLayoutGuide.layoutFrame
-        let bottomLayoutFrame = bottomLayoutGuide.layoutFrame
-        let contentLayoutFrame = contentLayoutGuide.layoutFrame
-        
-        // When the content inset not any changes, ignore.
-        let top = topLayoutFrame.height + contentLayoutFrame.height + bottomLayoutFrame.height
-        guard top != itemContentInset.top else {
-            return
-        }
-        itemContentInset.top = top
-
-        // When the content size not any change, ignore.
-        let newConetntHeight = contentLayoutFrame.height
-        guard newConetntHeight != contentSize.height else {
-            return
-        }
-        contentSize.height = newConetntHeight
-        parallaxable.setNeedsUpdateContentSize()
-    }
-    
-    func bringSubviewToFrontIfNeeded() {
-        // When the layer index not any changes, ignore.
-        guard cachedLayerIndex != actualViewIndex else {
-            return
-        }
-        // Recalculate view index when bring to front.
-        containerView.superview?.bringSubviewToFront(containerView)
-        cachedLayerIndex = actualViewIndex
-    }
-    
-    /// Update the subview of the layout guide.
-    private func updateSubview(_ newValue: UIView?, from oldValue: UIView?, layoutGuide: inout XCParallaxableInsetLayoutGuide) {
-        // When the view not any changes, ignore.
-        guard newValue !== oldValue else {
-            return
-        }
-        
-        // Must remove the old view before add a new view.
-        oldValue?.removeFromSuperview()
-        
-        // When the new value is empty, ignore.
-        guard let newValue = newValue else {
-            return
-        }
-        
-        // Remove from superview to clean all related constraints.
-        newValue.removeFromSuperview()
-        newValue.translatesAutoresizingMaskIntoConstraints = false
-        
-        containerView.addSubview(newValue)
-        containerView.addConstraints(layoutGuide.constraints(insetTo: newValue))
-    }
-    
-    /// Update the make view.
-    private func buildMaskView(_ isClipped: Bool) -> UIView? {
-        // When clipped is disable, clear the mask view.
-        if !isClipped {
-            cachedMaskView = nil
-            return nil
-        }
-        // When mask is hit, reuse it.
-        guard cachedMaskView == nil else {
-            return cachedMaskView
-        }
-        // Build a new mask view.
-        let width = max(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
-        let view = UIView(frame: .init(x: 0, y: 0, width: width, height: width))
-        view.backgroundColor = .black
-        view.transform = .init(translationX: 0, y: contentOffset.y)
-        cachedMaskView = view
-        return view
-    }
-    
-    /// Create a custom pagging manager.
-    init(_ parallaxable: XCParallaxableController) {
-        // The association must bind at init.
-        self.parallaxable = parallaxable
-        
-        self.containerView = ContainerView.dynamicInit(name: "XCParallaxablePresentedView", frame: .zero)
-        self.containerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        self.containerView.clipsToBounds = true
-        self.containerView.translatesAutoresizingMaskIntoConstraints = false
-        
-        self.topLayoutGuide = .init(owned: containerView)
-        self.bottomLayoutGuide = .init(owned: containerView)
-        self.contentLayoutGuide = .init(owned: containerView)
-
-        self.navigationLayoutConstraint = topLayoutGuide.heightAnchor.constraint(equalToConstant: 0)
-        self.navigationLayoutConstraint.priority = .required - 100
-
-        self.offsetLayoutConstraint = contentLayoutGuide.topAnchor.constraint(equalTo: topLayoutGuide.bottomAnchor)
-        self.offsetLayoutConstraint.priority = .required - 200
-        
-        NSLayoutConstraint.activate(
-            [
-                self.topLayoutGuide.topAnchor.constraint(equalTo: containerView.topAnchor),
-                self.topLayoutGuide.leftAnchor.constraint(equalTo: containerView.leftAnchor),
-                self.topLayoutGuide.rightAnchor.constraint(equalTo: containerView.rightAnchor),
-
-                self.bottomLayoutGuide.topAnchor.constraint(greaterThanOrEqualTo: topLayoutGuide.bottomAnchor),
-                self.bottomLayoutGuide.leftAnchor.constraint(equalTo: containerView.leftAnchor),
-                self.bottomLayoutGuide.rightAnchor.constraint(equalTo: containerView.rightAnchor),
-                self.bottomLayoutGuide.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-
-                self.contentLayoutGuide.leftAnchor.constraint(equalTo: containerView.leftAnchor),
-                self.contentLayoutGuide.rightAnchor.constraint(equalTo: containerView.rightAnchor),
-                self.contentLayoutGuide.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor),
-
-                self.offsetLayoutConstraint,
-                self.navigationLayoutConstraint,
-            ]
-        )
-    }
-    
-    private var activedItem: Item? {
-        willSet {
-            activedItem?.removeObservers()
-            newValue?.addObservers()
-        }
-    }
-    
-    private var cachedLayerIndex: Int?
-    private var cachedContainerHeight: CGFloat?
-    private var cachedMaskView: UIView?
-
-    private var topLayoutGuide: XCParallaxableInsetLayoutGuide
-    private var bottomLayoutGuide: XCParallaxableInsetLayoutGuide
-    private var contentLayoutGuide: XCParallaxableInsetLayoutGuide
-    
-    private let navigationLayoutConstraint: NSLayoutConstraint
-    private let offsetLayoutConstraint: NSLayoutConstraint
-    
-    private unowned(unsafe) let parallaxable: XCParallaxableController
-}
-
-
-// MARK: -
-
-
-@dynamicMemberLookup
 fileprivate struct XCParallaxableInsetLayoutGuide {
     
     var contentInset: UIEdgeInsets = .zero {
@@ -1358,34 +1333,30 @@ fileprivate struct XCParallaxableChangeEvent: OptionSet {
 // MARK: -
 
 
-private extension UIView {
-    
-    @inline(__always) static func dynamicInit<T>(name: String, frame: CGRect) -> T where T: UIView {
-        // Lazy load/register class for name
-        func getRuntimeClass() -> T.Type? {
-            // If the class already registered, use it directly.
-            if let clazz = NSClassFromString(name) as? T.Type {
-                return clazz
-            }
-            // Register a new class.
-            if let clazz = objc_allocateClassPair(T.self, name, 0) {
-                objc_registerClassPair(clazz)
-                return clazz as? T.Type
-            }
-            return nil
-        }
-        let clazz = getRuntimeClass() ?? T.self
-        return clazz.init(frame: frame)
-    }
-}
-
 private extension UITableView {
     
     /// Global hotfix used counting, disable hotfix when the count is zero, enable hotfix when the count is nonzero.
     static var _paraxable_hotfixUsedCount: Int = 0 {
         willSet {
-            // When enabled or disable not any changes, ignore.
-            guard (newValue != 0) != (_paraxable_hotfixUsedCount != 0) else {
+            let newHotfixEnabled = newValue != 0
+            // Enabled hotfix is immediate.
+            guard !newHotfixEnabled else {
+                _paraxable_hotfixEnabled = newHotfixEnabled
+                return
+            }
+            // Disable hotfix only when no one is in use for 10 seconds.
+            Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [newValue] _ in
+                if _paraxable_hotfixUsedCount == newValue {
+                    _paraxable_hotfixEnabled = newHotfixEnabled
+                }
+            }
+        }
+    }
+    
+    /// A Boolean value that determines whether global context inset hotfix enabled.
+    static var _paraxable_hotfixEnabled: Bool = false {
+        willSet {
+            guard newValue != _paraxable_hotfixEnabled else {
                 return
             }
             // Quickly swap two implementations.
@@ -1393,6 +1364,7 @@ private extension UITableView {
                let new = class_getInstanceMethod(Self.self, NSSelectorFromString("_paraxable_contentInset")) {
                 method_exchangeImplementations(org, new)
             }
+            print(#function, newValue)
         }
     }
 
