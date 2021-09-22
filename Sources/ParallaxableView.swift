@@ -9,10 +9,10 @@ import UIKit
 import SwiftUI
 
 
-/// A container that split the data arranged into each page, optionally providing the ability
-/// to custom navigation bar/fold/pinned.
+/// A container that split the data arranged into mut page, optionally providing the ability
+/// to custom navigation bar/fold content/pinned footer.
 ///
-/// In its simplest form, a ParallaxableView creates its contents statically, as shown in the following example:
+/// In its simplest form, a parallaxable view creates its contents statically, as shown in the following example:
 /// ```
 /// var body: some View {
 ///     ParallaxableView {
@@ -24,13 +24,22 @@ import SwiftUI
 /// ```
 public struct ParallaxableView: View {
 
+    /// Creates a parallaxable view with the given page content that supports selecting.
+    ///
+    /// - Parameters:
+    ///   - selection: A binding to that identifies selected index.
+    ///   - content: The page content of the parallaxable view.
     public init(selection: Binding<Int>? = nil, @ParallaxableBuilder content: () -> ParallaxableContent) {
         self.content = content()
         self.selection = selection
     }
 
+    /// The content of parallaxable view.
     public var body: some View {
         _XCParallaxableViewContainer(content: content, selection: selection, configuration: configuration)
+            .transformPreference(_XCParallaxableViewProxy.self) {
+                $0.append(configuration)
+            }
     }
 
     private let content: ParallaxableContent
@@ -40,36 +49,58 @@ public struct ParallaxableView: View {
 
 public extension ParallaxableView {
     
+    /// Clips this view and content view to bar/scrollable bounding rectangular frame.
+    ///
+    /// Use the `clipped(antialiased:)` modifier to hide any content that
+    /// extends beyond the layout bounds of the shape.
+    ///
+    /// By default, a view's bounding frame is used only for layout, so any
+    /// content that extends beyond the edges of the frame is still visible.
+    ///
+    /// - Parameter antialiased: A Boolean value that indicates whether the
+    ///   rendering system applies smoothing to the edges of the clipping
+    ///   rectangle.
     func parallaxableClipped(antialiased: Bool = false) -> Self {
         _parallaxableConfiguration {
             $0.isClipped = true
             $0.isAntialiased = antialiased
         }
     }
+    
+    /// Adds an action to perform when the parallaxable view value changes.
+    ///
+    /// - Parameter action: The action to perform when this parallaxable view value
+    ///   changes. The `action` closure's parameter contains the parallaxable view new
+    ///   value.
     func onParallaxableChanged(action: @escaping (CGPoint) -> Void) -> Self {
         _parallaxableConfiguration {
             $0.contentOffsetObservers.append(action)
         }
     }
 
+    /// Layers the given views behind navigation bar.
     func parallaxableHeader<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.headerView)
     }
+    /// Layers the given foldable views.
     func parallaxableContent<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.contentView)
     }
+    /// Layers the given pinned views.
     func parallaxableFooter<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.footerView)
     }
     
+    /// Layers the given views before parallaxable.
     func parallaxableOverlay<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.overlayView)
     }
+    /// Layers the given views behind parallaxable.
     func parallaxableBackground<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.backgroundView)
     }
     
-
+    /// Configures a custom SwiftUI.View to the specified key path.
     private func _parallaxableCustomView<T: View>(_ view: T, for keyPath: ReferenceWritableKeyPath<_XCParallaxableViewCoordinator, UIView?>) -> Self {
         _parallaxableConfiguration {
             $0.handlers[keyPath] = {
@@ -84,15 +115,77 @@ public extension ParallaxableView {
 }
 
 
-
-
 // MARK: -
 
 
+/// A proxy value that supports programmatic scrolling of the scrollable
+/// views within a view hierarchy.
+///
+/// You don't create instances of ``ParallaxableViewProxy`` directly. Instead, your
+/// ``ParallaxableViewReader`` receives an instance of ``ParallaxableViewProxy`` in its
+/// `content` view builder. You use actions within this view builder, such
+/// as button and gesture handlers or the ``ParallaxableView/onParallaxableChanged(action:)``
+/// method, to call the proxy's ``ParallaxableViewProxy/scrollTo(_:anchor:)`` method.
 public struct ParallaxableViewProxy {
     
+    /// The size of the parallaxable view presentation content.
+    public var contentSize: CGSize {
+        proxy.contentSize
+    }
+    
+    public var contentOffset: CGPoint {
+        get { proxy.contentOffset }
+        nonmutating set { proxy.contentOffset = newValue }
+    }
+    
+    public func setContentOffset(_ newContentOffset: CGPoint, animated: Bool) {
+        proxy.setContentOffset(newContentOffset, animated: animated)
+    }
+    
+    fileprivate var proxy: _XCParallaxableViewProxy = .init()
 }
 
+/// A view that provides programmatic scrolling, by working with a proxy
+/// to scroll to known child views.
+///
+/// The scroll view reader's content view builder receives a ``ParallaxableViewProxy``
+/// instance; you use the proxy's ``ParallaxableViewProxy/scrollTo(_:anchor:)`` to
+/// perform scrolling.
+///
+/// The following example creates a ``ParallaxableView`` containing 100 views that
+/// together display a color gradient. It also contains two buttons, one each
+/// at the top and bottom. The top button tells the ``ParallaxableViewProxy`` to
+/// scroll to the bottom button, and vice versa.
+///
+///     var body: some View {
+///         ParallaxableViewReader { proxy in
+///             ParallaxableView {
+///                 ScrollView {
+///                     VStack(spacing: 0) {
+///                         ForEach(0..<100) { i in
+///                             color(fraction: Double(i) / 100)
+///                                 .frame(height: 32)
+///                         }
+///                     }
+///                 }
+///                 .overlay(Button("Move to down") {
+///                     withAnimation {
+///                         proxy.contentOffset.y += 10
+///                     }
+///                 })
+///             }
+///         }
+///     }
+///
+///     func color(fraction: Double) -> Color {
+///         Color(red: fraction, green: 1 - fraction, blue: 0.5)
+///     }
+///
+/// > Important: You may not use the ``ParallaxableViewProxy``
+/// during execution of the `content` view builder; doing so results in a
+/// runtime error. Instead, only actions created within `content` can call
+/// the proxy, such as gesture handlers or a view's `onChange(of:perform:)`
+/// method.
 public struct ParallaxableViewReader<Content: View>: View {
     
     /// The view builder that creates the reader's content.
@@ -110,14 +203,13 @@ public struct ParallaxableViewReader<Content: View>: View {
     
     /// The content and behavior of the view.
     public var body: some View {
-        if #available(iOS 14.0, *) {
-            ScrollViewReader { _ in
-                content(ParallaxableViewProxy())
+        content(proxy)
+            .onPreferenceChange(_XCParallaxableViewProxy.self) {
+                $0.last?.proxy = proxy.proxy
             }
-        } else {
-            content(ParallaxableViewProxy())
-        }
     }
+    
+    private var proxy: ParallaxableViewProxy = .init()
 }
 
 
@@ -223,34 +315,53 @@ public struct ParallaxableBuilder {
 // MARK: -
 
 
-// MARK: -
-
-
-fileprivate class _XCParallaxableViewConfiguration {
-
-//    static var defaultValue: _XCParallaxableViewConfiguration = .init()
+fileprivate class _XCParallaxableViewProxy: PreferenceKey {
     
+    static var defaultValue: [_XCParallaxableViewConfiguration] = []
+    static func reduce(value: inout Value, nextValue: () -> Value) {
+        value.append(contentsOf: nextValue())
+    }
+    
+    var contentSize: CGSize {
+        configuration?.parallaxableController?.contentSize ?? .zero
+    }
+    
+    var contentOffset: CGPoint {
+        get { configuration?.parallaxableController?.contentOffset ?? .zero }
+        set { configuration?.parallaxableController?.contentOffset = newValue }
+    }
+    
+    func setContentOffset(_ newContentOffset: CGPoint, animated: Bool) {
+        configuration?.parallaxableController?.setContentOffset(newContentOffset, animated: animated)
+    }
+
+    weak var configuration: _XCParallaxableViewConfiguration?
+}
+
+fileprivate class _XCParallaxableViewConfiguration: NSObject {
+    
+
     var isClipped: Bool = false
     var isAntialiased: Bool = false
     
     var handlers: [AnyKeyPath: (_XCParallaxableViewCoordinator) -> ()] = [:]
     
     var contentOffsetObservers: [(CGPoint) -> ()] = []
+    
+    weak var parallaxableController: XCParallaxableController?
+    weak var proxy: _XCParallaxableViewProxy? {
+        willSet {
+            proxy?.configuration = nil
+            newValue?.configuration = self
+        }
+    }
 }
-
-//fileprivate extension EnvironmentValues {
-//
-//    var _parallaxableViewConfiguration: _XCParallaxableViewConfiguration {
-//        get { self[_XCParallaxableViewConfiguration.self] }
-//        set { self[_XCParallaxableViewConfiguration.self] = newValue }
-//    }
-//}
 
 
 // MARK: -
 
 
-/// Maybe let `ParallaxableView` conforms to `UIViewControllerRepresentable` protocol is better,
+/// Maybe let ``ParallaxableView`` conforms to ``UIViewControllerRepresentable`` protocol is better,
 /// But we don't want to public internal details.
 fileprivate struct _XCParallaxableViewContainer: UIViewControllerRepresentable {
     
@@ -290,7 +401,9 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     /// The context shared parallaxable controller.
     let parallaxableController: XCParallaxableController
     
-    
+        
+    var overlayView: UIView?
+
     var backgroundView: UIView? {
         willSet {
             guard newValue !== backgroundView else {
@@ -315,8 +428,6 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         }
     }
     
-    
-    var overlayView: UIView?
 
     /// Update the all pages content to shared parallaxable controller.
     func setContentView(_ pages: ParallaxableContent) {
@@ -363,11 +474,12 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         parallaxableController.isClipped = configuration.isClipped
         
         // Apply `SwiftUI.View` changes in to subview.
+        configuration.parallaxableController = parallaxableController
         configuration.handlers.values.forEach {
             $0(self)
         }
         
-        // Make sure the backgroundView/foregroundView in the right view hierarchy.
+        // Make sure the backgroundView/overlayView in the right view hierarchy.
         backgroundView.map(self.parallaxingView.sendSubviewToBack)
         overlayView.map(self.parallaxingView.bringSubviewToFront)
     }
@@ -540,13 +652,6 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
 /// It is not recommended to use `_UIHostingView` directly.
 /// Once Apple removed `_UIHostingView`, we should replace implementation with `UIHostingController`.
 fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
-    
-//    /// In the hosting view for the parallaxable controller can't using any `safeAreaInsets`.
-//    /// But `_UIHostingView/UIHostingController` can't understand our intention,
-//    /// To fix this issue we must let to always return to zero of `_UIHostingView` the `safeAreaInsets`.
-//    override var safeAreaInsets: UIEdgeInsets {
-//        return .zero
-//    }
     
 //    override func layoutSubviews() {
 //        super.layoutSubviews()

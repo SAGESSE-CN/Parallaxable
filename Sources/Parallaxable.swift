@@ -1212,7 +1212,7 @@ fileprivate final class XCParallaxableItem: Equatable {
             return source.collectionView
             
         case let source as AnyObject where hasContentScrollView:
-            // If the target is `XCParallaxableContainerView` suggesting that this is a nested parallaxable controller,
+            // If the scrollView is `XCParallaxableContainerView` suggesting that is a nested parallaxable controller,
             // just to disable parent parallaxable controller vertical scroll.
             guard let scrollView = source.contentScrollView(), !(scrollView is XCParallaxableContainerView) else {
                 return nil
@@ -1364,7 +1364,6 @@ private extension UITableView {
                let new = class_getInstanceMethod(Self.self, NSSelectorFromString("_paraxable_contentInset")) {
                 method_exchangeImplementations(org, new)
             }
-            print(#function, newValue)
         }
     }
 
