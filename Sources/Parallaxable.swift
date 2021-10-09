@@ -213,15 +213,9 @@ import UIKit
     open override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         
-        // When the bounds not any changes, ignore.
-        guard !isLockedConentChanges, view.bounds.size != cachedSize else {
-            return
-        }
-        cachedSize = view.bounds.size
-
-        // Update all subview layout when the bounds.size is changes.
+        // Update all subview layout if needed.
         performWithoutContentChangesIfNeeded {
-            updateHorizontalContentOffsetIfNeeded()
+            updateHorizontalContentOffsetWhenBoundsChanges()
             updateVerticalContentOffsetIfNeeded()
         }
     }
@@ -271,22 +265,12 @@ import UIKit
         }
     }
     
-    
-    @objc fileprivate func contentScrollView() -> UIScrollView? {
-        return (selectedViewController as AnyObject?)?.contentScrollView()
+    open var needsLockedConentChanges: Bool {
+        return isLockedConentChanges
     }
     
-    
-    /// Perform something should not trigger the content changes of prevents recursive calls version.
-    fileprivate func performWithoutContentChangesIfNeeded(_ actions: () -> Void) {
-        // When the content offset changes is loacked, ignore.
-        guard !isLockedConentChanges else {
-            return
-        }
-        performWithoutContentChanges(actions)
-    }
     /// Perform something should not trigger the content changes.
-    fileprivate func performWithoutContentChanges(_ actions: () -> Void) {
+    open func performWithoutContentChanges(_ actions: () -> Void) {
         // Because this method is only executed on the main thread, there is no need to lock it.
         let oldValue = isLockedConentChanges
         let oldMergeFlags = isMergeChanges
@@ -298,7 +282,20 @@ import UIKit
         isMergeChanges = oldMergeFlags
         updateContentChangesIfNeeded()
     }
+
     
+    @objc fileprivate func contentScrollView() -> UIScrollView? {
+        return (selectedViewController as AnyObject?)?.contentScrollView()
+    }
+    
+    /// Perform something should not trigger the content changes of prevents recursive calls version.
+    fileprivate func performWithoutContentChangesIfNeeded(_ actions: () -> Void) {
+        // When the content offset changes is loacked, ignore.
+        guard !isLockedConentChanges else {
+            return
+        }
+        performWithoutContentChanges(actions)
+    }
     
     /// Start the scroll animation if needed.
     fileprivate func beginScrollAnimation(_ animated: Bool) {
@@ -403,7 +400,15 @@ import UIKit
         }
     }
     
-    /// The horizontal content offset is changed.
+    /// Update horizontal content offset when frame is change.
+    fileprivate func updateHorizontalContentOffsetWhenBoundsChanges() {
+        guard view.bounds.size != cachedSize else {
+            return
+        }
+        cachedSize = view.bounds.size
+        updateHorizontalContentOffsetIfNeeded()
+    }
+    /// Update horizontal content offset when has any changes.
     fileprivate func updateHorizontalContentOffsetIfNeeded() {
         performWithoutContentChanges {
             containerView.updateItemLayouts()
@@ -411,7 +416,8 @@ import UIKit
             presentationView.move(toSuperview: scrollableItem(at: containerView.contentOffset))
         }
     }
-    /// The vertical content offset is changed.
+    
+    /// Update vertical content offset when has any changes.
     fileprivate func updateVerticalContentOffsetIfNeeded() {
         performWithoutContentChanges {
             presentationView.updateContentSizeIfNeeded()
@@ -969,9 +975,9 @@ fileprivate class XCParallaxablePresentationView: UIView {
     private var contentMaskView: UIView?
     private var cacedActivedItem: XCParallaxableItem?
 
-    private lazy var topLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
-    private lazy var bottomLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
-    private lazy var contentLayoutGuide: XCParallaxableInsetLayoutGuide = .init(owned: self)
+    private lazy var topLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "T", owned: self)
+    private lazy var bottomLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "B", owned: self)
+    private lazy var contentLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "C", owned: self)
     
     private lazy var navigationLayoutConstraint: NSLayoutConstraint = topLayoutGuide.heightAnchor.constraint(equalToConstant: 0)
     private lazy var offsetLayoutConstraint: NSLayoutConstraint = contentLayoutGuide.topAnchor.constraint(equalTo: topLayoutGuide.bottomAnchor)
@@ -1314,7 +1320,8 @@ fileprivate struct XCParallaxableInsetLayoutGuide {
         get { layoutGuide[keyPath: keyPath] }
     }
     
-    init(owned: UIView) {
+    init(name: String, owned: UIView) {
+        layoutGuide.identifier = name
         owned.addLayoutGuide(layoutGuide)
     }
 

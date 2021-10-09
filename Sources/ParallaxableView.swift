@@ -37,8 +37,15 @@ public struct ParallaxableView: View {
     /// The content of parallaxable view.
     public var body: some View {
         _XCParallaxableViewContainer(content: content, selection: selection, configuration: configuration)
-            .transformPreference(_XCParallaxableViewProxy.self) {
+            .transformPreference(_XCParallaxableViewConfiguration.self) {
                 $0.append(configuration)
+            }
+            .onPreferenceChange(_XCParallaxableViewProxy.self) {
+                $0.forEach {
+                    if $0.configuration == nil {
+                        $0.configuration = configuration
+                    }
+                }
             }
     }
 
@@ -90,7 +97,7 @@ public extension ParallaxableView {
     func parallaxableFooter<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.footerView)
     }
-    
+
     /// Layers the given views before parallaxable.
     func parallaxableOverlay<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.overlayView)
@@ -99,7 +106,26 @@ public extension ParallaxableView {
     func parallaxableBackground<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.backgroundView)
     }
+
     
+    func parallaxableHeader<T: View>(@ViewBuilder view: () -> T) -> Self {
+        parallaxableHeader(view())
+    }
+
+    func parallaxableContent<T: View>(@ViewBuilder view: () -> T) -> Self {
+        parallaxableContent(view())
+    }
+    func parallaxableFooter<T: View>(@ViewBuilder view: () -> T) -> Self {
+        parallaxableFooter(view())
+    }
+
+    func parallaxableOverlay<T: View>(@ViewBuilder view: () -> T) -> Self {
+        parallaxableOverlay(view())
+    }
+    func parallaxableBackground<T: View>(@ViewBuilder view: () -> T) -> Self {
+        parallaxableBackground(view())
+    }
+
     /// Configures a custom SwiftUI.View to the specified key path.
     private func _parallaxableCustomView<T: View>(_ view: T, for keyPath: ReferenceWritableKeyPath<_XCParallaxableViewCoordinator, UIView?>) -> Self {
         _parallaxableConfiguration {
@@ -130,19 +156,19 @@ public struct ParallaxableViewProxy {
     
     /// The size of the parallaxable view presentation content.
     public var contentSize: CGSize {
-        proxy.contentSize
+        forwarding.contentSize
     }
     
     public var contentOffset: CGPoint {
-        get { proxy.contentOffset }
-        nonmutating set { proxy.contentOffset = newValue }
+        get { forwarding.contentOffset }
+        nonmutating set { forwarding.contentOffset = newValue }
     }
     
     public func setContentOffset(_ newContentOffset: CGPoint, animated: Bool) {
-        proxy.setContentOffset(newContentOffset, animated: animated)
+        forwarding.setContentOffset(newContentOffset, animated: animated)
     }
     
-    fileprivate var proxy: _XCParallaxableViewProxy = .init()
+    fileprivate var forwarding: _XCParallaxableViewProxy = .init()
 }
 
 /// A view that provides programmatic scrolling, by working with a proxy
@@ -204,8 +230,11 @@ public struct ParallaxableViewReader<Content: View>: View {
     /// The content and behavior of the view.
     public var body: some View {
         content(proxy)
-            .onPreferenceChange(_XCParallaxableViewProxy.self) {
-                $0.last?.proxy = proxy.proxy
+            .transformPreference(_XCParallaxableViewProxy.self) {
+                $0.append(proxy.forwarding)
+            }
+            .onPreferenceChange(_XCParallaxableViewConfiguration.self) {
+                proxy.forwarding.configuration = $0.last
             }
     }
     
@@ -315,31 +344,39 @@ public struct ParallaxableBuilder {
 // MARK: -
 
 
-fileprivate class _XCParallaxableViewProxy: PreferenceKey {
+fileprivate class _XCParallaxableViewProxy: NSObject, PreferenceKey {
     
-    static var defaultValue: [_XCParallaxableViewConfiguration] = []
+    static var defaultValue: [_XCParallaxableViewProxy] = []
     static func reduce(value: inout Value, nextValue: () -> Value) {
         value.append(contentsOf: nextValue())
     }
     
     var contentSize: CGSize {
-        configuration?.parallaxableController?.contentSize ?? .zero
+        parallaxableController?.contentSize ?? .zero
     }
     
     var contentOffset: CGPoint {
-        get { configuration?.parallaxableController?.contentOffset ?? .zero }
-        set { configuration?.parallaxableController?.contentOffset = newValue }
+        get { parallaxableController?.contentOffset ?? .zero }
+        set { parallaxableController?.contentOffset = newValue }
     }
     
     func setContentOffset(_ newContentOffset: CGPoint, animated: Bool) {
-        configuration?.parallaxableController?.setContentOffset(newContentOffset, animated: animated)
+        parallaxableController?.setContentOffset(newContentOffset, animated: animated)
+    }
+
+    var parallaxableController: XCParallaxableController? {
+        return configuration?.coordinator?.parallaxableController
     }
 
     weak var configuration: _XCParallaxableViewConfiguration?
 }
 
-fileprivate class _XCParallaxableViewConfiguration: NSObject {
-    
+fileprivate class _XCParallaxableViewConfiguration: NSObject, PreferenceKey {
+
+    static var defaultValue: [_XCParallaxableViewConfiguration] = []
+    static func reduce(value: inout Value, nextValue: () -> Value) {
+        value.append(contentsOf: nextValue())
+    }
 
     var isClipped: Bool = false
     var isAntialiased: Bool = false
@@ -348,13 +385,7 @@ fileprivate class _XCParallaxableViewConfiguration: NSObject {
     
     var contentOffsetObservers: [(CGPoint) -> ()] = []
     
-    weak var parallaxableController: XCParallaxableController?
-    weak var proxy: _XCParallaxableViewProxy? {
-        willSet {
-            proxy?.configuration = nil
-            newValue?.configuration = self
-        }
-    }
+    weak var coordinator: _XCParallaxableViewCoordinator?
 }
 
 
@@ -414,7 +445,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
             }
             newValue.map {
                 let parallaxingView = parallaxableController.parallaxingView
-                $0.translatesAutoresizingMaskIntoConstraints = false
+                $0.contentMode = .redraw
                 parallaxingView.insertSubview($0, at: 0)
                 let topConstraint = $0.topAnchor.constraint(equalTo: parallaxingView.topAnchor)
                 topConstraint.priority = .defaultHigh
@@ -474,7 +505,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         parallaxableController.isClipped = configuration.isClipped
         
         // Apply `SwiftUI.View` changes in to subview.
-        configuration.parallaxableController = parallaxableController
+        configuration.coordinator = self
         configuration.handlers.values.forEach {
             $0(self)
         }
@@ -551,6 +582,7 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
         super.init(frame: .zero)
         
         // Build all hosting view height constraints.
+        self.translatesAutoresizingMaskIntoConstraints = false
         self.viewController = viewController
         self.hostingViewHeight = (
             heightAnchor.constraint(lessThanOrEqualToConstant: 0),
@@ -566,60 +598,17 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
         fatalError("init(coder:) has not been implemented")
     }
     
-    override func invalidateIntrinsicContentSize() {
-        super.invalidateIntrinsicContentSize()
-        
-        // Mark need to recalculate of the content size.
-        hostingViewSize = nil
-        viewController?.viewIfLoaded?.setNeedsLayout()
+    override func updateConstraints() {
+        super.updateConstraints()
+        hostingView?.performWithoutContentChangesIfNeeded {
+            updateHeightConstraintsIfNeeded()
+        }
     }
     
     override var intrinsicContentSize: CGSize {
-        // When the size is calculated, reuse.
-        if let intrinsicContentSize = hostingViewSize {
-            return intrinsicContentSize
-        }
-        
-        // If the hosting view is not attach, ignore.
-        guard let hostingView = hostingView else {
-            return super.intrinsicContentSize
-        }
-        let width = viewController?.view.bounds.width ?? window?.bounds.width ?? bounds.width
-        var height = CGFloat(0)
-
-        // Calculate the min size of the hosting view content.
-        let compressedSize = CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
-        let minSize = hostingView.sizeThatFits(compressedSize)
-        if minSize.height != compressedSize.height {
-            height = max(height, minSize.height)
-        }
-
-        // Calculate the max size of the hosting view content.
-        let expandedSize = CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
-        let maxSize = hostingView.sizeThatFits(expandedSize)
-        if maxSize.height != expandedSize.height {
-            height = max(height, maxSize.height)
-        }
-        
-        // The final hosting view height consists on multiple (le, eq, ge) height constraints.
-        hostingViewHeight.map {
-            // The equalTo(eq) constraint is calculate from the minSize and maxSize.
-            $0.le.constant = maxSize.height
-            $0.eq.constant = height
-            $0.ge.constant = minSize.height
-            // The equalTo(eq) constraint is activate only when the hosting view explicitly specified a size.
-            $0.le.isActive = true
-            $0.eq.isActive = minSize.height == maxSize.height
-            $0.ge.isActive = true
-        }
-//        print("\(Content.self).\(#function) => \(minSize.height) - \(maxSize.height)")
-        
-        // When the equalTo(eq) constraint is not active, the constraint engine requrired evaluates
-        // the final size based on the content size.
-        let intrinsicContentSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
-        hostingViewSize = intrinsicContentSize
-        return intrinsicContentSize
+        return hostingViewSize ?? super.intrinsicContentSize
     }
+    
     
     /// Replace hosting view with the specified content.
     func replace(_ content: Content)  {
@@ -632,13 +621,68 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
         newValue.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(newValue)
         hostingView = newValue
-
-        invalidateIntrinsicContentSize()
     }
     
+    func updateHeightConstraintsIfNeeded() {
+        // Update the constraints of the current view when the estimated size changes.
+        guard let (minHeight, maxHeight, height) = estimatedSize(), hostingEstimatedSize?.0 != minHeight || hostingEstimatedSize?.1 != maxHeight else {
+            return
+        }
+        hostingEstimatedSize = (minHeight, maxHeight)
+        
+        // The final hosting view height consists on multiple (le, eq, ge) height constraints.
+        hostingViewHeight.map {
+            // The equalTo(eq) constraint is calculate from the minSize and maxSize.
+            $0.le.constant = maxHeight
+            $0.eq.constant = height
+            $0.ge.constant = minHeight
+            // The equalTo(eq) constraint is activate only when the hosting view explicitly specified a size.
+            $0.le.isActive = true
+            $0.eq.isActive = minHeight == maxHeight
+            $0.ge.isActive = true
+        }
+        //print("\(Content.self).\(#function) => \(minHeight) - \(height) - \(maxHeight)")
+        
+        // When the equalTo(eq) constraint is not active, the constraint engine requrired evaluates
+        // the final size based on the content size.
+        hostingViewSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
+        super.invalidateIntrinsicContentSize()
+    }
+    
+    
+    private func estimatedSize() -> (CGFloat, CGFloat, CGFloat)? {
+        // There is no need to estimate the size when the view is not ready.
+        guard let hostingView = hostingView, let width = viewController?.viewIfLoaded?.bounds.width ?? window?.bounds.width else {
+            return nil
+        }
+        var height = CGFloat(0)
+        
+        // Calculate the min size of the hosting view content.
+        let compressedSize = CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
+        let minHeight = pixelate(hostingView.sizeThatFits(compressedSize).height)
+        if minHeight != compressedSize.height {
+            height = max(minHeight, height)
+        }
+
+        // Calculate the max size of the hosting view content.
+        let expandedSize = CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
+        let maxHeight = pixelate(hostingView.sizeThatFits(expandedSize).height)
+        if maxHeight != expandedSize.height {
+            height = max(maxHeight, height)
+        }
+
+        return (minHeight, maxHeight, height)
+    }
+
+    private func pixelate(_ value: CGFloat) -> CGFloat {
+        return trunc(value * 10) / 10
+    }
+    
+        
     private var hostingView: _XCParallaxableHostingView<Content>?
     private var hostingViewSize: CGSize?
     private var hostingViewHeight: (le: NSLayoutConstraint, eq: NSLayoutConstraint, ge: NSLayoutConstraint)?
+    private var hostingEstimatedSize: (CGFloat, CGFloat)?
 
     private weak var viewController: UIViewController?
 }
@@ -653,24 +697,20 @@ fileprivate class _XCParallaxableHostingWrapperView<Content: View>: UIView {
 /// Once Apple removed `_UIHostingView`, we should replace implementation with `UIHostingController`.
 fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
     
-//    override func layoutSubviews() {
-//        super.layoutSubviews()
-//
-//        let newSize = self.sizeThatFits(UIView.layoutFittingCompressedSize)
-//        if newSize != cachedSize {
-//            cachedSize = newSize
-////            print("\(Content.self).\(#function) => \(newSize)")
-//        }
-//    }
-//
-//    var cachedSize: CGSize?
-//    override func didAddSubview(_ subview: UIView) {
-//        super.didAddSubview(subview)
-//        superview?.invalidateIntrinsicContentSize()
-//    }
-//
-//    override func willRemoveSubview(_ subview: UIView) {
-//        super.willRemoveSubview(subview)
-//        superview?.invalidateIntrinsicContentSize()
-//    }
+     func performWithoutContentChangesIfNeeded(_ actions: () -> Void) {
+        let oldValue = isLockedConentChanges
+        isLockedConentChanges = true
+        actions()
+        isLockedConentChanges = oldValue
+    }
+
+    override func setNeedsLayout() {
+        super.setNeedsLayout()
+        guard !isLockedConentChanges, superview?.contentMode != .redraw else {
+            return
+        }
+        superview?.setNeedsUpdateConstraints()
+    }
+    
+    private var isLockedConentChanges: Bool = false
 }
