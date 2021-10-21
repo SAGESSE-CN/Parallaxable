@@ -26,7 +26,7 @@ import UIKit
     /// - parameter parallaxableController: The parallaxable controller that is notifying you of the changes
     /// - parameter index: The index of that was selected.
     @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didSelectItemAt index: Int)
-
+    
     /// Tells the delegate when the content size was changes.
     /// - parameter parallaxableController: The parallaxable controller in which the content size changes
     /// - parameter contentSize: The new content size after the content changes
@@ -41,7 +41,7 @@ import UIKit
 
 /// An simple parallaxable controller.
 @objc open class XCParallaxableController: UIViewController, UIScrollViewDelegate {
-
+    
     /// The view that displays in the status bar or navigation bar content.
     ///
     /// When assigning a view to this property, the height of the view from:
@@ -106,12 +106,12 @@ import UIKit
             }
         }
     }
-
+    
     /// The size of the parallaxable controller content.
     @objc open var contentSize: CGSize {
         return cachedContentSize
     }
-
+    
     /// The point at which the origin of the parallaxing view is offset from the origin of the parallaxable controller.
     @objc open var contentOffset: CGPoint {
         get { cachedContentOffset }
@@ -160,7 +160,7 @@ import UIKit
         get { presentationView.isClipped }
         set { presentationView.isClipped = newValue }
     }
-
+    
     
     /// The pagging container view associated with this controller.
     @objc open var paggingView: UIScrollView {
@@ -192,7 +192,7 @@ import UIKit
     open override func viewDidAppear(_ animated: Bool) {
         // Continue forwarding appearance methods and process other handler.
         super.viewDidAppear(animated)
-
+        
         // When the view controller is already displayed in the view hierarchy,
         // UIKit can't automatically forwarding to appearance methods of
         // child view controller the any opereations, so we must manually forwarding.
@@ -222,7 +222,7 @@ import UIKit
     
     open override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
-
+        
         // Synchronize into parallaxing.
         performWithoutContentChangesIfNeeded {
             presentationView.itemSafeAreaInsets.top = view.safeAreaInsets.top - additionalSafeAreaInsets.top
@@ -258,18 +258,17 @@ import UIKit
             updateHorizontalContentOffsetIfNeeded()
         }
     }
-
+    
     open func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         performWithoutContentChangesIfNeeded {
             endScrollAnimation()
         }
     }
     
-    open var needsLockedConentChanges: Bool {
-        return isLockedConentChanges
+    open var allowsConentChanges: Bool {
+        return !isLockedConentChanges
     }
     
-    /// Perform something should not trigger the content changes.
     open func performWithoutContentChanges(_ actions: () -> Void) {
         // Because this method is only executed on the main thread, there is no need to lock it.
         let oldValue = isLockedConentChanges
@@ -282,7 +281,7 @@ import UIKit
         isMergeChanges = oldMergeFlags
         updateContentChangesIfNeeded()
     }
-
+    
     
     @objc fileprivate func contentScrollView() -> UIScrollView? {
         return (selectedViewController as AnyObject?)?.contentScrollView()
@@ -397,6 +396,8 @@ import UIKit
                 updater(scrollView, contentOffset)
                 updateVerticalContentOffsetIfNeeded()
             }
+            // Cached the last content offset.
+            cachedContentOffset = newValue
         }
     }
     
@@ -448,7 +449,7 @@ import UIKit
     private var cachedContentSize: CGSize = .zero
     
     private var cachedItems: [XCParallaxableItem] = []
-        
+    
     fileprivate lazy var containerView: XCParallaxableContainerView = .init(self)
     fileprivate lazy var presentationView: XCParallaxablePresentationView = .init(self)
 }
@@ -488,7 +489,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
         parallaxable.setNeedsStatusBarAppearanceUpdate()
         cachedSize = nil
     }
-
+    
     /// The selected index for selected item.
     var selectedIndex: Int {
         get { visabledIndex }
@@ -539,7 +540,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
     var selectedItem: XCParallaxableItem? {
         return item(at: selectedIndex)
     }
-
+    
     /// Update the subviews layout of contents.
     func updateItemLayouts() {
         // When the frame is not any chagnes, ignore.
@@ -728,7 +729,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
             updateSubview(footerView, from: oldValue, layoutGuide: &bottomLayoutGuide)
         }
     }
-
+    
     /// The all managed items with added to view controller of parallaxable controller.
     var items: [XCParallaxableItem] = []
     /// Update the all managed items with added to view controller of parallaxable controller.
@@ -803,7 +804,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
         contentOffset.y = newValue
         parallaxable.setNeedsUpdateContentOffset()
     }
-
+    
     /// A Boolean value that indicates whether has begun should render.
     var shouldRenderInHierarchy: Bool {
         return headerView != nil || contentView != nil || footerView != nil
@@ -820,7 +821,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
             items.forEach(actions)
         }
     }
-        
+    
     /// Move item to scrollable view
     func move(toSuperview item: XCParallaxableItem?) {
         // When the contanier is not ready, ignore.
@@ -839,7 +840,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
         newSuperview.addSubview(self)
         updateContentSizeIfNeeded()
         updateActivedItem(item)
-
+        
         // Always pinned the container to superview.
         NSLayoutConstraint.activate(
             [
@@ -859,7 +860,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
             return
         }
         cachedContainerHeight = newContainerHeight
-
+        
         // Calculate all the layoutGuides frame information.
         let topLayoutFrame = topLayoutGuide.layoutFrame
         let bottomLayoutFrame = bottomLayoutGuide.layoutFrame
@@ -871,7 +872,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
             return
         }
         itemContentInset.top = top
-
+        
         // When the content size not any change, ignore.
         let newConetntHeight = contentLayoutFrame.height
         guard newConetntHeight != contentSize.height else {
@@ -937,12 +938,12 @@ fileprivate class XCParallaxablePresentationView: UIView {
         // The association must bind at init.
         self.parallaxable = parallaxable
         super.init(frame: .zero)
-
+        
         self.clipsToBounds = true
         self.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         self.translatesAutoresizingMaskIntoConstraints = false
         self.layer.zPosition = 1000
-
+        
         self.navigationLayoutConstraint.priority = .required - 100
         self.offsetLayoutConstraint.priority = .required - 200
         
@@ -951,16 +952,16 @@ fileprivate class XCParallaxablePresentationView: UIView {
                 topLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
                 topLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
                 topLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
-
+                
                 bottomLayoutGuide.topAnchor.constraint(greaterThanOrEqualTo: topLayoutGuide.bottomAnchor),
                 bottomLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
                 bottomLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
                 bottomLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
-
+                
                 contentLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
                 contentLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
                 contentLayoutGuide.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor),
-
+                
                 offsetLayoutConstraint,
                 navigationLayoutConstraint,
             ]
@@ -974,7 +975,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
     private var cachedContainerHeight: CGFloat?
     private var contentMaskView: UIView?
     private var cacedActivedItem: XCParallaxableItem?
-
+    
     private lazy var topLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "T", owned: self)
     private lazy var bottomLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "B", owned: self)
     private lazy var contentLayoutGuide: XCParallaxableInsetLayoutGuide = .init(name: "C", owned: self)
@@ -1029,7 +1030,7 @@ fileprivate final class XCParallaxableItem: Equatable {
     
     /// A Boolean value indicating whether the view is currently loaded into memory.
     var isViewLoaded: Bool = false
-
+    
     /// The frame rectangle, same the controller.view.frame, setter are delayed when view not loaded.
     var frame: CGRect = .zero {
         willSet {
@@ -1110,7 +1111,7 @@ fileprivate final class XCParallaxableItem: Equatable {
         scrollView?.removeObserver(parallaxable, forKeyPath: "contentOffset")
         isObsrvering = false
     }
-
+    
     /// Update the content offset of the scrollable view with new content offset.
     func updateContentOffset(_ newValue: CGPoint) {
         // When the scroll view is not found, ignore.
@@ -1271,7 +1272,7 @@ fileprivate final class XCParallaxableItem: Equatable {
     
     private var adjustedScrollIndicatorTop: CGFloat = 0
     private var adjustedScrollDecorationsTop: CGFloat = 0
-
+    
     private var isObsrvering: Bool = false
     
     private let hasContentScrollView = UIViewController.instancesRespond(to: #selector(AnyObject.contentScrollView))
@@ -1324,7 +1325,7 @@ fileprivate struct XCParallaxableInsetLayoutGuide {
         layoutGuide.identifier = name
         owned.addLayoutGuide(layoutGuide)
     }
-
+    
     private var layoutGuide: UILayoutGuide = .init()
     private var insetConstraint: [NSLayoutConstraint]?
 }
@@ -1373,7 +1374,7 @@ private extension UITableView {
             }
         }
     }
-
+    
     /// We need to changes table view header panned without `setContentInset`, resolved by change `_contentInset`,
     /// But this is a undocumented API, it work in iOS 10 - iOS 15(or more).
     @objc func _paraxable_contentInset() -> UIEdgeInsets {
