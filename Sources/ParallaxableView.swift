@@ -496,6 +496,7 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     func setContentSection(_ selection: Binding<Int>?, animated: Bool) {
         // Prepare the callback context.
         selectedIndexObserver = selection
+        
         // Synchronize the selected index of the selection.
         let newSelectedIndex = selection?.wrappedValue ?? 0
         guard newSelectedIndex != parallaxableController.selectedIndex else {
@@ -543,11 +544,13 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
             // Unable to find a reusable hosting controller in the reuse queue.
             return UIHostingController(rootView: view)
         }
+        
         // Once a reusable hosting controller is found, remove it from the reuse queue.
         guard let controller = reusableHostingControllers?.remove(at: index) as? UIHostingController<T> else {
             // This is something that should never happen, but if happen create a new hosting controller.
             return UIHostingController(rootView: view)
         }
+        
         // Replace the root view with content.
         controller.rootView = view
         return controller
@@ -586,52 +589,40 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
 /// An `UIHostingController` compatible controller.
 fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingController<Content> {
     
-    override func loadView() {
-        view = _XCParallaxableHostingView(rootView: rootView)
-    }
-}
-
-/// An `_UIHostingView` compatible view.
-fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
-    
-    required init(rootView: Content) {
-        super.init(rootView: rootView)
-        
-        // Build all hosting view height constraints.
-        self.translatesAutoresizingMaskIntoConstraints = false
-        self.hostingViewHeight = (
-            heightAnchor.constraint(lessThanOrEqualToConstant: 0),
-            heightAnchor.constraint(equalToConstant: 0),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
-        )
-    }
-    
-    required init?(coder aDecoder: NSCoder) {
-        super.init(coder: aDecoder)
-    }
-    
-    override var safeAreaInsets: UIEdgeInsets {
-        return .zero
-    }
-    
-    override var intrinsicContentSize: CGSize {
+    var intrinsicContentSize: CGSize {
         // The exact content needs to be calculated before getter.
-        if hostingViewSize == nil {
-            updateHeightConstraintsIfNeeded {}
+        if cachedIntrinsicContentSize == nil {
+            updateHeightConstraintsIfNeeded()
         }
-        return hostingViewSize ?? super.intrinsicContentSize
+        return cachedIntrinsicContentSize ?? .zero
     }
     
-    override func setNeedsLayout() {
-        super.setNeedsLayout()
-        guard !isLockedConentChanges, contentMode != .redraw else {
+    func invalidateIntrinsicContentSize() {
+        guard !isLockedConentChanges, view.contentMode != .redraw else {
             return
         }
-        hostingViewSize = nil
-        setNeedsUpdateConstraints()
+        cachedIntrinsicContentSize = nil
+        view.invalidateIntrinsicContentSize()
     }
     
-    private func updateHeightConstraintsIfNeeded(_ changes: () -> ()) {
+    override func loadView() {
+        super.loadView()
+        // The default background color is black, but we need to support alpha.
+        view.backgroundColor = .clear
+        view.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Using multiple height constraints to control the size of the view.
+        heightConstraint = (
+            view.heightAnchor.constraint(lessThanOrEqualToConstant: 0),
+            view.heightAnchor.constraint(equalToConstant: 0),
+            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        )
+
+        // Inject bug fix patch class.
+        object_setClass(view, _XCParallaxableHostingView<Content>.self)
+    }
+    
+    private func updateHeightConstraintsIfNeeded() {
         // Lock the content changes to avoid recursive calls.
         let oldValue = isLockedConentChanges
         isLockedConentChanges = true
@@ -643,14 +634,16 @@ fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Cont
         guard let (minHeight, maxHeight, height) = estimatedSize() else {
             return
         }
-        guard hostingEstimatedSize?.0 != minHeight || hostingEstimatedSize?.1 != maxHeight else {
-            hostingViewSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
+        
+        let newValue = CGVector(dx: minHeight, dy: maxHeight)
+        guard hostingEstimatedSize != newValue else {
+            cachedIntrinsicContentSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
             return
         }
-        hostingEstimatedSize = (minHeight, maxHeight)
+        hostingEstimatedSize = newValue
         
         // The final hosting view height consists on multiple (le, eq, ge) height constraints.
-        hostingViewHeight.map {
+                heightConstraint.map {
             // The equalTo(eq) constraint is calculate from the minSize and maxSize.
             $0.le.constant = maxHeight
             $0.eq.constant = height
@@ -660,31 +653,30 @@ fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Cont
             $0.eq.isActive = minHeight == maxHeight
             $0.ge.isActive = true
         }
-        // print("\(Content.self).\(#function) => \(minHeight) - \(height) - \(maxHeight)")
+        print("\(Content.self).\(#function) => \(minHeight) - \(height) - \(maxHeight)")
         
         // When the equalTo(eq) constraint is not active, the constraint engine requrired evaluates
         // the final size based on the content size.
-        hostingViewSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
-        changes()
+        cachedIntrinsicContentSize = CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
     
     private func estimatedSize() -> (CGFloat, CGFloat, CGFloat)? {
         // There is no need to estimate the size when the view is not ready.
-        guard let width = window?.bounds.width else {
+        guard let width = view.window?.bounds.width else {
             return nil
         }
         var height = CGFloat(0)
         
         // Calculate the min size of the hosting view content.
         let compressedSize = CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
-        let minHeight = pixelate(sizeThatFits(compressedSize).height)
+        let minHeight = pixelate(sizeThatFits(in: compressedSize).height)
         if minHeight != compressedSize.height {
             height = max(minHeight, height)
         }
         
         // Calculate the max size of the hosting view content.
         let expandedSize = CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
-        let maxHeight = pixelate(sizeThatFits(expandedSize).height)
+        let maxHeight = pixelate(sizeThatFits(in: expandedSize).height)
         if maxHeight != expandedSize.height {
             height = max(maxHeight, height)
         }
@@ -696,9 +688,37 @@ fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Cont
         return trunc(value * 10) / 10
     }
     
-    private var hostingViewSize: CGSize?
-    private var hostingViewHeight: (le: NSLayoutConstraint, eq: NSLayoutConstraint, ge: NSLayoutConstraint)?
-    private var hostingEstimatedSize: (CGFloat, CGFloat)?
+    private var cachedIntrinsicContentSize: CGSize?
+    
+    private var         heightConstraint: (le: NSLayoutConstraint, eq: NSLayoutConstraint, ge: NSLayoutConstraint)?
+    private var hostingEstimatedSize: CGVector?
     
     private var isLockedConentChanges: Bool = false
+
+}
+
+/// An `_UIHostingView` compatible view.
+fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
+        
+    /// This is a bug fix, because content does not require any safe area insets.
+    override var safeAreaInsets: UIEdgeInsets {
+        return .zero
+    }
+    
+    /// In any time call `intrinsicContentSize` to always calculate actual content size.
+    override var intrinsicContentSize: CGSize {
+        return hostingController?.intrinsicContentSize ?? super.intrinsicContentSize
+    }
+    
+    /// When the content size changes, the SwiftUI engine will call setNeedsLayout to reload view layout.
+    /// Best solution is recive a content size changes notification in the future.
+    override func setNeedsLayout() {
+        super.setNeedsLayout()
+        hostingController?.invalidateIntrinsicContentSize()
+    }
+    
+    /// Get the hosting controller in view hierarchy context.
+    @inline(__always) private var hostingController: _XCParallaxableHostingController<Content>? {
+        return next as? _XCParallaxableHostingController<Content>
+    }
 }

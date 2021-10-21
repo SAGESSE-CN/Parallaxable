@@ -132,7 +132,7 @@ import UIKit
     
     /// The index of the view controller associated with the currently selected page item.
     @objc open var selectedIndex: Int {
-        get { containerView.selectedIndex }
+        get { lockedSelectedIndex ?? containerView.selectedIndex }
         set { setSelectedIndex(newValue, animated: false) }
     }
     
@@ -215,7 +215,7 @@ import UIKit
         
         // Update all subview layout if needed.
         performWithoutContentChangesIfNeeded {
-            updateHorizontalContentOffsetWhenBoundsChanges()
+            updateHorizontalContentOffsetIfNeeded()
             updateVerticalContentOffsetIfNeeded()
         }
     }
@@ -253,15 +253,18 @@ import UIKit
         }
     }
     
+    
+#if targetEnvironment(macCatalyst)
     open func scrollViewDidScroll(_ scrollView: UIScrollView) {
         performWithoutContentChangesIfNeeded {
             updateHorizontalContentOffsetIfNeeded()
         }
     }
+#endif
     
     open func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         performWithoutContentChangesIfNeeded {
-            endScrollAnimation()
+            unlockSelectedIndexIfNeeded()
         }
     }
     
@@ -296,23 +299,23 @@ import UIKit
         performWithoutContentChanges(actions)
     }
     
-    /// Start the scroll animation if needed.
-    fileprivate func beginScrollAnimation(_ animated: Bool) {
-        // When locked staus not any changes, ignore.
-        guard isLockedIndexChanges != animated else {
+    
+    /// Locks the current selected index.
+    fileprivate func lockSelectedIndex(_ selectedIndex: Int, animated: Bool) {
+        // When change selected index without animations, automatic unlock.
+        guard animated else {
+            unlockSelectedIndexIfNeeded()
             return
         }
-        endScrollAnimation()
-        isLockedIndexChanges = animated
+        lockedSelectedIndex = selectedIndex
     }
-    /// Stop the scroll animation.
-    fileprivate func endScrollAnimation() {
-        // When locked staus not any changes, ignore.
-        guard isLockedIndexChanges != false else {
+    /// Unlocak the current selected index.
+    fileprivate func unlockSelectedIndexIfNeeded() {
+        // When the current selected index is locked, must need to manually calculate the actual selected index immediate.
+        guard lockedSelectedIndex != nil else {
             return
         }
-        isLockedIndexChanges = false
-        // The selected index maybe changed and needs to be immediate notice.
+        lockedSelectedIndex = nil
         setNeedsUpdateSelected()
     }
     
@@ -369,7 +372,7 @@ import UIKit
         }
         
         // Process the selected index change event.
-        if let _ = changes.remove(.selectedIndex), !isLockedIndexChanges {
+        if let _ = changes.remove(.selectedIndex), lockedSelectedIndex == nil {
             // When the visabled index is changes, update the status bar.
             setNeedsStatusBarAppearanceUpdate()
             
@@ -401,14 +404,6 @@ import UIKit
         }
     }
     
-    /// Update horizontal content offset when frame is change.
-    fileprivate func updateHorizontalContentOffsetWhenBoundsChanges() {
-        guard view.bounds.size != cachedSize else {
-            return
-        }
-        cachedSize = view.bounds.size
-        updateHorizontalContentOffsetIfNeeded()
-    }
     /// Update horizontal content offset when has any changes.
     fileprivate func updateHorizontalContentOffsetIfNeeded() {
         performWithoutContentChanges {
@@ -435,13 +430,11 @@ import UIKit
     private var isMergeChanges: Bool = false
     private var isLockedConentChanges: Bool = false
     private var isLockedParallaxingView: Bool = true
-    private var isLockedIndexChanges: Bool = false
     
     private var isAutomaticallyLinking: Bool = false
     
-    private var tableViewTracker: Any?
+    private var lockedSelectedIndex: Int?
     
-    private var cachedSize: CGSize?
     private var cachedVisibleSize: CGSize?
     private var cachedVisibleMargins: UIEdgeInsets?
     
@@ -516,7 +509,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
         // Update the content offset for selected index.
         var newContentOffset = contentOffset
         newContentOffset.x = frame.width * .init(newValue)
-        parallaxable.beginScrollAnimation(animated)
+        parallaxable.lockSelectedIndex(newValue, animated: animated)
         setContentOffset(newContentOffset, animated: animated)
         
         // When setContentOffset with a animation, this a progressive process,
@@ -1097,19 +1090,23 @@ fileprivate final class XCParallaxableItem: Equatable {
     
     /// Add to observers of the scrollable view.
     func addObservers() {
+#if targetEnvironment(macCatalyst)
         guard !isObsrvering else {
             return
         }
         scrollView?.addObserver(parallaxable, forKeyPath: "contentOffset", options: .old, context: nil)
         isObsrvering = true
+#endif
     }
     /// Remove to observers of the scrollable view.
     func removeObservers() {
+#if targetEnvironment(macCatalyst)
         guard isObsrvering else {
             return
         }
         scrollView?.removeObserver(parallaxable, forKeyPath: "contentOffset")
         isObsrvering = false
+#endif
     }
     
     /// Update the content offset of the scrollable view with new content offset.
