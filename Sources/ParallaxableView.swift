@@ -9,7 +9,7 @@ import UIKit
 import SwiftUI
 
 
-/// A container that split the data arranged into mut page, optionally providing the ability
+/// A container that split the data arranged into mut page, optionally providing float view
 /// to custom navigation bar/fold content/pinned footer.
 ///
 /// In its simplest form, a parallaxable view creates its contents statically, as shown in the following example:
@@ -56,6 +56,24 @@ public struct ParallaxableView: View {
 
 public extension ParallaxableView {
     
+    /// Adds a condition that prevents float content bounces past the edge of contet size and back again.
+    ///
+    /// - parameter isDisabled: A Boolean that indicates whether bouncing is prevented.
+    func verticalBouncesDisabled(_ isDisabled: Bool = true) -> Self {
+        _parallaxableConfiguration {
+            $0.disablesBounceVertical = isDisabled
+        }
+    }
+    
+    ///  Adds a condition that prevents page content bounces past the edge of contet size and back again.
+    ///
+    /// - parameter isDisabled: A Boolean that indicates whether bouncing is prevented.
+    func horizontalBouncesDisabled(_ isDisabled: Bool = true) -> Self {
+        _parallaxableConfiguration {
+            $0.disablesBounceHorizontal = isDisabled
+        }
+    }
+    
     /// Clips this view and content view to bar/scrollable bounding rectangular frame.
     ///
     /// Use the `clipped(antialiased:)` modifier to hide any content that
@@ -67,7 +85,7 @@ public extension ParallaxableView {
     /// - Parameter antialiased: A Boolean value that indicates whether the
     ///   rendering system applies smoothing to the edges of the clipping
     ///   rectangle.
-    func parallaxableClipped(antialiased: Bool = false) -> Self {
+    func clipped(antialiased: Bool = false) -> Self {
         _parallaxableConfiguration {
             $0.isClipped = true
             $0.isAntialiased = antialiased
@@ -79,49 +97,52 @@ public extension ParallaxableView {
     /// - Parameter action: The action to perform when this parallaxable view value
     ///   changes. The `action` closure's parameter contains the parallaxable view new
     ///   value.
-    func onParallaxableChanged(action: @escaping (CGPoint) -> Void) -> Self {
+    func onChanged(action: @escaping (CGPoint) -> Void) -> Self {
         _parallaxableConfiguration {
             $0.contentOffsetObservers.append(action)
         }
     }
     
-    /// Layers the given views behind navigation bar.
+    /// The header view is float view displaying in navigation bar.
     func parallaxableHeader<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.headerView)
     }
-    /// Layers the given foldable views.
+    /// The content view is foldable view displaying after of header view.
     func parallaxableContent<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.contentView)
     }
-    /// Layers the given pinned views.
+    /// The footer view is pinable view displaying after of content view.
     func parallaxableFooter<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.footerView)
     }
     
-    /// Layers the given views before parallaxable.
+    /// The overlay view is resizable view displaying in top of all views.
     func parallaxableOverlay<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.overlayView)
     }
-    /// Layers the given views behind parallaxable.
+    /// The background view is resizable view displaying in bottom of all views.
     func parallaxableBackground<T: View>(_ view: T) -> Self {
         _parallaxableCustomView(view, for: \.backgroundView)
     }
     
-    
+    /// The header view is float view displaying in navigation bar.
     func parallaxableHeader<T: View>(@ViewBuilder view: () -> T) -> Self {
         parallaxableHeader(view())
     }
-    
+    /// The content view is foldable view displaying after of header view.
     func parallaxableContent<T: View>(@ViewBuilder view: () -> T) -> Self {
         parallaxableContent(view())
     }
+    /// The footer view is pinable view displaying after of content view.
     func parallaxableFooter<T: View>(@ViewBuilder view: () -> T) -> Self {
         parallaxableFooter(view())
     }
     
+    /// The overlay view is resizable view displaying in top of all views.
     func parallaxableOverlay<T: View>(@ViewBuilder view: () -> T) -> Self {
         parallaxableOverlay(view())
     }
+    /// The background view is resizable view displaying in bottom of all views.
     func parallaxableBackground<T: View>(@ViewBuilder view: () -> T) -> Self {
         parallaxableBackground(view())
     }
@@ -153,6 +174,11 @@ public extension ParallaxableView {
 /// as button and gesture handlers or the ``ParallaxableView/onParallaxableChanged(action:)``
 /// method, to call the proxy's ``ParallaxableViewProxy/scrollTo(_:anchor:)`` method.
 public struct ParallaxableViewProxy {
+    
+    /// The frame rectangle of the parallaxable view.
+    public var frame: CGRect {
+        return forwarding.frame
+    }
     
     /// The size of the parallaxable view presentation content.
     public var contentSize: CGSize {
@@ -351,6 +377,10 @@ fileprivate class _XCParallaxableViewProxy: NSObject, PreferenceKey {
         value.append(contentsOf: nextValue())
     }
     
+    var frame: CGRect {
+        parallaxableController?.viewIfLoaded?.frame ?? .zero
+    }
+    
     var contentSize: CGSize {
         parallaxableController?.contentSize ?? .zero
     }
@@ -380,6 +410,9 @@ fileprivate class _XCParallaxableViewConfiguration: NSObject, PreferenceKey {
     
     var isClipped: Bool = false
     var isAntialiased: Bool = false
+    
+    var disablesBounceVertical: Bool = false
+    var disablesBounceHorizontal: Bool = false
     
     var handlers: [AnyKeyPath: (_XCParallaxableViewCoordinator) -> ()] = [:]
     
@@ -432,52 +465,37 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     /// The context shared parallaxable controller.
     var parallaxableController: XCParallaxableController
     
-    /// The view that displays in the status bar or navigation bar content.
+    /// The header view is float view displaying in navigation bar.
     var headerView: UIViewController? {
         willSet {
             parallaxableController.headerView = newValue?.view
         }
     }
-    /// The view that displays below the header view.
+    /// The content view is foldable view displaying after of header view.
     var contentView: UIViewController? {
         willSet {
             parallaxableController.contentView = newValue?.view
         }
     }
-    /// The view that displays below the content view.
+    /// The footer view is pinable view displaying after of content view.
     var footerView: UIViewController? {
         willSet {
             parallaxableController.footerView = newValue?.view
         }
     }
     
-    var overlayView: UIViewController?
-    
-    var backgroundView: UIViewController? {
+    /// The overlay view is resizable view displaying in top of all views.
+    var overlayView: UIViewController? {
         willSet {
-            guard newValue !== backgroundView else {
-                return
-            }
-            backgroundView.map {
-                $0.view.removeFromSuperview()
-            }
-            newValue.map {
-                let view = $0.view!
-                let parallaxingView = parallaxableController.parallaxingView
-                let topConstraint = view.topAnchor.constraint(equalTo: parallaxingView.topAnchor)
-                topConstraint.priority = .defaultHigh
-                view.contentMode = .redraw
-                parallaxingView.insertSubview(view, at: 0)
-                NSLayoutConstraint.activate([
-                    topConstraint,
-                    view.leftAnchor.constraint(equalTo: parallaxingView.leftAnchor),
-                    view.rightAnchor.constraint(equalTo: parallaxingView.rightAnchor),
-                    view.bottomAnchor.constraint(equalTo: parallaxingView.bottomAnchor),
-                ])
-            }
+            setDecoratingView(newValue, from: overlayView)
         }
     }
-    
+    /// The background view is resizable view displaying in bottom of all views.
+    var backgroundView: UIViewController? {
+        willSet {
+            setDecoratingView(newValue, from: overlayView, at: 0)
+        }
+    }
     
     /// Update the all pages content to shared parallaxable controller.
     func setContentView(_ pages: ParallaxableContent) {
@@ -517,7 +535,31 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
             wrapper.rootView = view
             return
         }
-        self[keyPath: keyPath] = _XCParallaxableHostingController(rootView: view)
+        let hostingController = _XCParallaxableHostingController(rootView: view)
+        hostingController.isDecoratingView = keyPath == \.backgroundView || keyPath == \.overlayView
+        self[keyPath: keyPath] = hostingController
+    }
+    /// Update the decorating view for parallaxing view.
+    func setDecoratingView(_ newValue: UIViewController?, from oldValue: UIViewController?, at index: Int? = nil) {
+        guard newValue !== oldValue else {
+            return
+        }
+        // Remove the old decorating view if added.
+        oldValue?.viewIfLoaded?.removeFromSuperview()
+        guard let newValue = newValue else {
+            return
+        }
+        
+        // Setup the new decorating view.
+        let parallaxingView = parallaxableController.parallaxingView
+        parallaxingView.insertSubview(newValue.view, at: index ?? parallaxingView.subviews.count - 1)
+        NSLayoutConstraint.activate([
+            newValue.view.topAnchor.constraint(equalTo: parallaxingView.topAnchor),
+            newValue.view.leftAnchor.constraint(equalTo: parallaxingView.leftAnchor),
+            newValue.view.rightAnchor.constraint(equalTo: parallaxingView.rightAnchor),
+            newValue.view.bottomAnchor.constraint(equalTo: parallaxingView.bottomAnchor),
+        ])
+        
     }
     
     /// Apply the configuration.
@@ -525,6 +567,8 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         // Apply configuration to parallaxable controller.
         contentOffsetObservers = configuration.contentOffsetObservers
         parallaxableController.isClipped = configuration.isClipped
+        parallaxableController.disablesBounceVertical = configuration.disablesBounceVertical
+        parallaxableController.disablesBounceHorizontal = configuration.disablesBounceHorizontal
         
         // Apply `SwiftUI.View` changes in to subview.
         configuration.coordinator = self
@@ -589,7 +633,13 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
 /// An `UIHostingController` compatible controller.
 fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingController<Content> {
     
+    var isDecoratingView: Bool = false
+    
     var intrinsicContentSize: CGSize {
+        // For the decorating view does not require any intrinsic content size.
+        guard !isDecoratingView else {
+            return .zero
+        }
         // The exact content needs to be calculated before getter.
         if cachedIntrinsicContentSize == nil {
             updateHeightConstraintsIfNeeded()
@@ -598,7 +648,7 @@ fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingCont
     }
     
     func invalidateIntrinsicContentSize() {
-        guard !isLockedConentChanges, view.contentMode != .redraw else {
+        guard !isDecoratingView, !isLockedConentChanges else {
             return
         }
         cachedIntrinsicContentSize = nil
@@ -617,7 +667,7 @@ fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingCont
             view.heightAnchor.constraint(equalToConstant: 0),
             view.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
         )
-
+        
         // Inject bug fix patch class.
         object_setClass(view, _XCParallaxableHostingView<Content>.self)
     }
@@ -643,7 +693,7 @@ fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingCont
         hostingEstimatedSize = newValue
         
         // The final hosting view height consists on multiple (le, eq, ge) height constraints.
-                heightConstraint.map {
+        heightConstraint.map {
             // The equalTo(eq) constraint is calculate from the minSize and maxSize.
             $0.le.constant = maxHeight
             $0.eq.constant = height
@@ -653,7 +703,7 @@ fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingCont
             $0.eq.isActive = minHeight == maxHeight
             $0.ge.isActive = true
         }
-        print("\(Content.self).\(#function) => \(minHeight) - \(height) - \(maxHeight)")
+        // print("\(Content.self).\(#function) => \(minHeight) - \(height) - \(maxHeight)")
         
         // When the equalTo(eq) constraint is not active, the constraint engine requrired evaluates
         // the final size based on the content size.
@@ -690,16 +740,16 @@ fileprivate class _XCParallaxableHostingController<Content: View>: UIHostingCont
     
     private var cachedIntrinsicContentSize: CGSize?
     
-    private var         heightConstraint: (le: NSLayoutConstraint, eq: NSLayoutConstraint, ge: NSLayoutConstraint)?
+    private var  heightConstraint: (le: NSLayoutConstraint, eq: NSLayoutConstraint, ge: NSLayoutConstraint)?
     private var hostingEstimatedSize: CGVector?
     
     private var isLockedConentChanges: Bool = false
-
+    
 }
 
 /// An `_UIHostingView` compatible view.
 fileprivate class _XCParallaxableHostingView<Content: View>: _UIHostingView<Content> {
-        
+    
     /// This is a bug fix, because content does not require any safe area insets.
     override var safeAreaInsets: UIEdgeInsets {
         return .zero

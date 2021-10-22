@@ -95,6 +95,21 @@ import UIKit
         }
     }
     
+    /// A Boolean value that determines whether content view are confined to the bounds of the parallaxing view.
+    @objc open var isClipped: Bool {
+        get { presentationView.isClipped }
+        set { presentationView.isClipped = newValue }
+    }
+    
+    ///  A Boolean value that prevents all float content bounces past the edge of contet size and back again.
+    @objc open var disablesBounceVertical: Bool = false
+    ///  A Boolean value that prevents page content bounces past the edge of contet size and back again.
+    @objc open var disablesBounceHorizontal: Bool = false {
+        willSet {
+            paggingView.bounces = !newValue
+        }
+    }
+    
     /// The extra distance that the parallaxing view is inset from the scrollable view edges.
     @objc open var contentInset: UIEdgeInsets {
         get { presentationView.contentInset }
@@ -132,7 +147,7 @@ import UIKit
     
     /// The index of the view controller associated with the currently selected page item.
     @objc open var selectedIndex: Int {
-        get { lockedSelectedIndex ?? containerView.selectedIndex }
+        get { containerView.selectedIndex }
         set { setSelectedIndex(newValue, animated: false) }
     }
     
@@ -152,13 +167,6 @@ import UIKit
         performWithoutContentChanges {
             containerView.setSelectedIndex(selectedIndex, animated: animated)
         }
-    }
-    
-    
-    /// A Boolean value that determines whether content view are confined to the bounds of the parallaxing view.
-    @objc open var isClipped: Bool {
-        get { presentationView.isClipped }
-        set { presentationView.isClipped = newValue }
     }
     
     
@@ -197,6 +205,9 @@ import UIKit
         // UIKit can't automatically forwarding to appearance methods of
         // child view controller the any opereations, so we must manually forwarding.
         containerView.shouldForwardAppearanceMethods = true
+        
+        // The content scroll view maybe change when the appear state of the view controller changes.
+        setNeedsUpdateOfContentScrollView()
     }
     
     open override func viewWillDisappear(_ animated: Bool) {
@@ -264,15 +275,21 @@ import UIKit
     
     open func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         performWithoutContentChangesIfNeeded {
-            unlockSelectedIndexIfNeeded()
+            containerView.unlockSelectedIndexIfNeeded()
         }
     }
     
-    open var allowsConentChanges: Bool {
+    
+    /// Invalidates the current content scroll view of the receiver and triggers a content scroll view update during the next update cycle.
+    @objc open func setNeedsUpdateOfContentScrollView() {
+        containerView.selectedItem?.updateScrollViewIfNeeded()
+    }
+    
+    @objc open var allowsConentChanges: Bool {
         return !isLockedConentChanges
     }
     
-    open func performWithoutContentChanges(_ actions: () -> Void) {
+    @objc open func performWithoutContentChanges(_ actions: () -> Void) {
         // Because this method is only executed on the main thread, there is no need to lock it.
         let oldValue = isLockedConentChanges
         let oldMergeFlags = isMergeChanges
@@ -284,7 +301,6 @@ import UIKit
         isMergeChanges = oldMergeFlags
         updateContentChangesIfNeeded()
     }
-    
     
     @objc fileprivate func contentScrollView() -> UIScrollView? {
         return (selectedViewController as AnyObject?)?.contentScrollView()
@@ -299,25 +315,6 @@ import UIKit
         performWithoutContentChanges(actions)
     }
     
-    
-    /// Locks the current selected index.
-    fileprivate func lockSelectedIndex(_ selectedIndex: Int, animated: Bool) {
-        // When change selected index without animations, automatic unlock.
-        guard animated else {
-            unlockSelectedIndexIfNeeded()
-            return
-        }
-        lockedSelectedIndex = selectedIndex
-    }
-    /// Unlocak the current selected index.
-    fileprivate func unlockSelectedIndexIfNeeded() {
-        // When the current selected index is locked, must need to manually calculate the actual selected index immediate.
-        guard lockedSelectedIndex != nil else {
-            return
-        }
-        lockedSelectedIndex = nil
-        setNeedsUpdateSelected()
-    }
     
     /// Gets vertical scrollable item with content offset.
     fileprivate func scrollableItem(at offset: CGPoint) -> XCParallaxableItem? {
@@ -372,7 +369,7 @@ import UIKit
         }
         
         // Process the selected index change event.
-        if let _ = changes.remove(.selectedIndex), lockedSelectedIndex == nil {
+        if let _ = changes.remove(.selectedIndex), !containerView.isLockedSelectedIndex {
             // When the visabled index is changes, update the status bar.
             setNeedsStatusBarAppearanceUpdate()
             
@@ -433,8 +430,6 @@ import UIKit
     
     private var isAutomaticallyLinking: Bool = false
     
-    private var lockedSelectedIndex: Int?
-    
     private var cachedVisibleSize: CGSize?
     private var cachedVisibleMargins: UIEdgeInsets?
     
@@ -485,7 +480,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
     
     /// The selected index for selected item.
     var selectedIndex: Int {
-        get { visabledIndex }
+        get { lockedSelectedIndex ?? visabledIndex }
         set {
             // When the newValue not any changes, ignore.
             guard newValue != visabledIndex, newValue < items.count, newValue >= 0 else {
@@ -509,7 +504,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
         // Update the content offset for selected index.
         var newContentOffset = contentOffset
         newContentOffset.x = frame.width * .init(newValue)
-        parallaxable.lockSelectedIndex(newValue, animated: animated)
+        lockSelectedIndex(newValue, animated: animated)
         setContentOffset(newContentOffset, animated: animated)
         
         // When setContentOffset with a animation, this a progressive process,
@@ -639,6 +634,30 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
         }
     }
     
+    /// Get the selected index lock status.
+    var isLockedSelectedIndex: Bool {
+        return lockedSelectedIndex != nil
+    }
+
+    /// Locks the current selected index.
+    func lockSelectedIndex(_ selectedIndex: Int, animated: Bool) {
+        // When change selected index without animations, automatic unlock.
+        guard animated else {
+            unlockSelectedIndexIfNeeded()
+            return
+        }
+        lockedSelectedIndex = selectedIndex
+    }
+    /// Unlocak the current selected index.
+    func unlockSelectedIndexIfNeeded() {
+        // When the current selected index is locked, must need to manually calculate the actual selected index immediate.
+        guard lockedSelectedIndex != nil else {
+            return
+        }
+        lockedSelectedIndex = nil
+        parallaxable.setNeedsUpdateSelected()
+    }
+    
     /// Gets the content at index.
     private func item(at index: Int) -> XCParallaxableItem? {
         // When index is over boundary, ignore.
@@ -688,6 +707,8 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
     
     private var visabledIndex: Int = 0
     private var visibledIndexes: ClosedRange<Int>?
+    
+    private var lockedSelectedIndex: Int?
     
     private unowned(unsafe) let parallaxable: XCParallaxableController
 }
@@ -794,7 +815,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
         guard newValue != contentOffset.y else {
             return
         }
-        contentOffset.y = newValue
+        contentOffset.y = damping(newValue)
         parallaxable.setNeedsUpdateContentOffset()
     }
     
@@ -809,7 +830,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
     }
     
     /// Perform something should not trigger the content changes.
-    private func performWithoutContentChanges(_ actions: (XCParallaxableItem) -> Void) {
+    func performWithoutContentChanges(_ actions: (XCParallaxableItem) -> Void) {
         parallaxable.performWithoutContentChanges {
             items.forEach(actions)
         }
@@ -835,13 +856,11 @@ fileprivate class XCParallaxablePresentationView: UIView {
         updateActivedItem(item)
         
         // Always pinned the container to superview.
-        NSLayoutConstraint.activate(
-            [
-                topAnchor.constraint(equalTo: parallaxable.view.topAnchor),
-                leftAnchor.constraint(equalTo: parallaxable.view.leftAnchor),
-                rightAnchor.constraint(equalTo: parallaxable.view.rightAnchor),
-            ]
-        )
+        NSLayoutConstraint.activate([
+            topAnchor.constraint(equalTo: parallaxable.view.topAnchor),
+            leftAnchor.constraint(equalTo: parallaxable.view.leftAnchor),
+            rightAnchor.constraint(equalTo: parallaxable.view.rightAnchor),
+        ])
     }
     
     /// Update the subviews layout of contents.
@@ -926,6 +945,14 @@ fileprivate class XCParallaxablePresentationView: UIView {
         return view
     }
     
+    @inline(__always) private func damping(_ value: CGFloat) -> CGFloat {
+        // When bounces vertical is disabled, limit the value to prevent value beyond the boundary (zero - contentSize).
+        if parallaxable.disablesBounceVertical {
+            return max(value, 0)
+        }
+        return value
+    }
+    
     /// Create a custom pagging manager.
     init(_ parallaxable: XCParallaxableController) {
         // The association must bind at init.
@@ -940,25 +967,24 @@ fileprivate class XCParallaxablePresentationView: UIView {
         self.navigationLayoutConstraint.priority = .required - 100
         self.offsetLayoutConstraint.priority = .required - 200
         
-        NSLayoutConstraint.activate(
-            [
-                topLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
-                topLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
-                topLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
-                
-                bottomLayoutGuide.topAnchor.constraint(greaterThanOrEqualTo: topLayoutGuide.bottomAnchor),
-                bottomLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
-                bottomLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
-                bottomLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
-                
-                contentLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
-                contentLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
-                contentLayoutGuide.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor),
-                
-                offsetLayoutConstraint,
-                navigationLayoutConstraint,
-            ]
-        )
+        NSLayoutConstraint.activate([
+            
+            topLayoutGuide.topAnchor.constraint(equalTo: topAnchor),
+            topLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+            topLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+            
+            bottomLayoutGuide.topAnchor.constraint(greaterThanOrEqualTo: topLayoutGuide.bottomAnchor),
+            bottomLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+            bottomLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+            bottomLayoutGuide.bottomAnchor.constraint(equalTo: bottomAnchor),
+            
+            contentLayoutGuide.leftAnchor.constraint(equalTo: leftAnchor),
+            contentLayoutGuide.rightAnchor.constraint(equalTo: rightAnchor),
+            contentLayoutGuide.bottomAnchor.constraint(equalTo: bottomLayoutGuide.topAnchor),
+            
+            offsetLayoutConstraint,
+            navigationLayoutConstraint,
+        ])
     }
     
     required init?(coder: NSCoder) {
@@ -1278,7 +1304,6 @@ fileprivate final class XCParallaxableItem: Equatable {
 }
 
 fileprivate extension XCParallaxableItem {
-    
     /// Returns a Boolean value indicating whether two values are equal.
     static func == (lhs: XCParallaxableItem, rhs: XCParallaxableItem) -> Bool {
         return rhs.viewController == rhs.viewController
@@ -1338,7 +1363,7 @@ fileprivate struct XCParallaxableChangeEvent: OptionSet {
 // MARK: -
 
 
-private extension UITableView {
+fileprivate extension UITableView {
     
     /// Global hotfix used counting, disable hotfix when the count is zero, enable hotfix when the count is nonzero.
     static var _paraxable_hotfixUsedCount: Int = 0 {
