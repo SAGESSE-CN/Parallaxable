@@ -23,19 +23,40 @@ import UIKit
     
     /// Tells the delegate that the item at the specified index was selected.
     ///
-    /// - parameter parallaxableController: The parallaxable controller that is notifying you of the changes
+    /// - parameter parallaxableController: The parallaxable controller that is notifying you of the changes.
     /// - parameter index: The index of that was selected.
     @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didSelectItemAt index: Int)
     
     /// Tells the delegate when the content size was changes.
-    /// - parameter parallaxableController: The parallaxable controller in which the content size changes
+    /// - parameter parallaxableController: The parallaxable controller in which the content size changes.
     /// - parameter contentSize: The new content size after the content changes
     @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didChangeContentSize contentSize: CGSize)
     
     /// Tells the delegate when the user scrolls the content view within the receiver.
-    /// - parameter parallaxableController: The parallaxable controller in which the scrolling occurred
+    /// - parameter parallaxableController: The parallaxable controller in which the scrolling occurred.
     /// - parameter contentOffset: The new content offset after the content changes
     @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didChangeContentOffset contentOffset: CGPoint)
+    
+    
+    /// Notifies the parallaxable controller that its view is about to be added to a view hierarchy.
+    /// - parameter parallaxableController: The parallaxable controller in which the about to be added.
+    /// - parameter animated: If true, the view is being added to the window using an animation.
+    @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, willAppear animated: Bool)
+    
+    /// Notifies the parallaxable controller that its view was added to a view hierarchy.
+    /// - parameter parallaxableController: The parallaxable controller in which the was added added.
+    /// - parameter animated: If true, the view was added to the window using an animation.
+    @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didAppear animated: Bool)
+    
+    /// Notifies the parallaxable controller that its view is about to be removed from a view hierarchy.
+    /// - parameter parallaxableController: The parallaxable controller in which the to be removed.
+    /// - parameter animated: If true, the disappearance of the view is being animated.
+    @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, willDisappear animated: Bool)
+    
+    /// Notifies the parallaxable controller that its view was removed from a view hierarchy.
+    /// - parameter parallaxableController: The parallaxable controller in which the was removed.
+    /// - parameter animated: If true, the disappearance of the view was animated.
+    @objc optional func parallaxableController(_ parallaxableController: XCParallaxableController, didDisappear animated: Bool)
 }
 
 
@@ -197,17 +218,11 @@ import UIKit
         view.addSubview(paggingView)
     }
     
-    open override func viewDidAppear(_ animated: Bool) {
-        // Continue forwarding appearance methods and process other handler.
-        super.viewDidAppear(animated)
+    open override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
         
-        // When the view controller is already displayed in the view hierarchy,
-        // UIKit can't automatically forwarding to appearance methods of
-        // child view controller the any opereations, so we must manually forwarding.
-        containerView.shouldForwardAppearanceMethods = true
-        
-        // The content scroll view maybe change when the appear state of the view controller changes.
-        setNeedsUpdateOfContentScrollView()
+        // Forwarding the appearance methods to the delegate's.
+        delegate?.parallaxableController?(self, willAppear: animated)
     }
     
     open override func viewWillDisappear(_ animated: Bool) {
@@ -219,6 +234,32 @@ import UIKit
         
         // Continue forwarding appearance methods and process other handler.
         super.viewWillDisappear(animated)
+        
+        // Forwarding the appearance methods to the delegate's.
+        delegate?.parallaxableController?(self, willDisappear: animated)
+    }
+    
+    open override func viewDidAppear(_ animated: Bool) {
+        // Continue forwarding appearance methods and process other handler.
+        super.viewDidAppear(animated)
+        
+        // When the view controller is already displayed in the view hierarchy,
+        // UIKit can't automatically forwarding to appearance methods of
+        // child view controller the any opereations, so we must manually forwarding.
+        containerView.shouldForwardAppearanceMethods = true
+        
+        // The content scroll view maybe change when the appear state of the view controller changes.
+        setNeedsUpdateOfContentScrollView()
+        
+        // Forwarding the appearance methods to the delegate's.
+        delegate?.parallaxableController?(self, didAppear: animated)
+    }
+    
+    open override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        
+        // Forwarding the appearance methods to the delegate's.
+        delegate?.parallaxableController?(self, didDisappear: animated)
     }
     
     open override func viewWillLayoutSubviews() {

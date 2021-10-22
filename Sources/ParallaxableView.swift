@@ -448,9 +448,11 @@ fileprivate struct _XCParallaxableViewContainer: UIViewControllerRepresentable {
     
     /// Update all pages content in to coordinator of the current context.
     func updateUIViewController(_ viewController: UIViewControllerType, context: Context) {
-        context.coordinator.apply(configuration)
-        context.coordinator.setContentView(content)
-        context.coordinator.setContentSection(selection, animated: !context.transaction.disablesAnimations)
+        context.coordinator.performWithoutContentChanges {
+            $0.apply(configuration)
+            $0.setContentView(content)
+            $0.setContentSection(selection, animated: !context.transaction.disablesAnimations)
+        }
     }
 }
 
@@ -600,7 +602,27 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
         return controller
     }
     
+    func performWithoutContentChanges(_ actions: (_XCParallaxableViewCoordinator) -> ()) {
+        isLockedContentChanges = true
+        actions(self)
+        isLockedContentChanges = false
+    }
+    
+    func notifyChangesIfNeeded(_ newValue: CGPoint) {
+        //
+        guard lastNotifyedContentOffset != newValue else {
+            return
+        }
+        lastNotifyedContentOffset = newValue
+        contentOffsetObservers.forEach {
+            $0(newValue)
+        }
+    }
+    
     func parallaxableController(_ parallaxableController: XCParallaxableController, didSelectItemAt index: Int) {
+        guard !isLockedContentChanges else {
+            return
+        }
         // Notifiy selection the selected index is changes.
         guard let selection = selectedIndexObserver, selection.wrappedValue != index else {
             return
@@ -609,16 +631,23 @@ fileprivate class _XCParallaxableViewCoordinator: XCParallaxableControllerDelega
     }
     
     func parallaxableController(_ parallaxableController: XCParallaxableController, didChangeContentOffset contentOffset: CGPoint) {
-        // Notifiy observers the content offset is changes.
-        contentOffsetObservers.forEach {
-            $0(contentOffset)
+        guard !isLockedContentChanges else {
+            return
         }
+        notifyChangesIfNeeded(contentOffset)
+    }
+    
+    func parallaxableController(_ parallaxableController: XCParallaxableController, didAppear animated: Bool) {
+        notifyChangesIfNeeded(parallaxableController.contentOffset)
     }
     
     init() {
         self.parallaxableController = .init()
         self.parallaxableController.delegate = self
     }
+    
+    private var isLockedContentChanges: Bool = false
+    private var lastNotifyedContentOffset: CGPoint?
     
     private var reusableHostingControllers: [UIViewController]?
     
