@@ -574,7 +574,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
     func updateItemLayouts() {
         // When the frame is not any chagnes, ignore.
         let size = frame.size
-        guard size.width != cachedSize?.width else {
+        guard size != cachedSize else {
             return
         }
         cachedSize = size
