@@ -425,7 +425,7 @@ import UIKit
             let dx = newValue.x - cachedContentOffset.x
             if dx != 0 {
                 var contentOffset = paggingView.contentOffset
-                contentOffset.x += dx
+                contentOffset.x = newValue.x
                 updater(paggingView, contentOffset)
                 updateHorizontalContentOffsetIfNeeded()
             }
@@ -702,7 +702,7 @@ fileprivate class XCParallaxableContainerView: UIScrollView {
     /// Gets the content at index.
     private func item(at index: Int) -> XCParallaxableItem? {
         // When index is over boundary, ignore.
-        guard index < items.count else {
+        guard index >= 0 && index < items.count else {
             return nil
         }
         return items[index]
@@ -890,18 +890,17 @@ fileprivate class XCParallaxablePresentationView: UIView {
         guard newSuperview !== superview else {
             return
         }
-        // Remove superview will clean all related constraints.
-        removeFromSuperview()
+        // Move to new superview.
         newSuperview.addSubview(self)
         updateContentSizeIfNeeded()
         updateActivedItem(item)
         
         // Always pinned the container to superview.
-        NSLayoutConstraint.activate([
+        superviewConstraints = [
             topAnchor.constraint(equalTo: parallaxable.view.topAnchor),
             leftAnchor.constraint(equalTo: parallaxable.view.leftAnchor),
             rightAnchor.constraint(equalTo: parallaxable.view.rightAnchor),
-        ])
+        ]
     }
     
     /// Update the subviews layout of contents.
@@ -950,10 +949,7 @@ fileprivate class XCParallaxablePresentationView: UIView {
             return
         }
         
-        // Must remove the old view before add a new view.
         oldValue?.removeFromSuperview()
-        
-        // When the new value is empty, ignore.
         guard let newValue = newValue else {
             return
         }
@@ -1042,6 +1038,12 @@ fileprivate class XCParallaxablePresentationView: UIView {
     
     private lazy var navigationLayoutConstraint: NSLayoutConstraint = topLayoutGuide.heightAnchor.constraint(equalToConstant: 0)
     private lazy var offsetLayoutConstraint: NSLayoutConstraint = contentLayoutGuide.topAnchor.constraint(equalTo: topLayoutGuide.bottomAnchor)
+    private lazy var superviewConstraints: [NSLayoutConstraint] = [] {
+        willSet {
+            NSLayoutConstraint.deactivate(superviewConstraints)
+            NSLayoutConstraint.activate(newValue)
+        }
+    }
     
     private unowned(unsafe) let parallaxable: XCParallaxableController
 }
